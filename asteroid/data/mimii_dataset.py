@@ -110,7 +110,7 @@ class MIMIIDataset(torch.utils.data.Dataset):
             start = 0
 
         # load sources
-        for source in self.sources:
+        for i, source in enumerate(self.sources):
             # optionally select a random track for each source
             if self.random_track_mix:
                 # load a different track
@@ -130,13 +130,13 @@ class MIMIIDataset(torch.utils.data.Dataset):
 
             # load actual audio
             audio, _ = sf.read(
-                Path(self.tracks[track_id]["path"]),
+                Path(self.tracks[track_id]["source_paths"][i]),
                 always_2d=True,
                 start=start_sample,
                 stop=stop_sample,
             )
             # convert to torch tensor
-            audio = torch.tensor(audio.T, dtype=torch.float)[:1, :]
+            audio = torch.tensor(audio.T, dtype=torch.float)[:2, :]
             # apply source-wise augmentations
             audio = self.source_augmentations(audio)
             audio_sources[source] = audio
@@ -147,6 +147,8 @@ class MIMIIDataset(torch.utils.data.Dataset):
             audio_sources = torch.stack(
                 [wav for src, wav in audio_sources.items() if src in self.targets], dim=0
             )
+        # print(audio_mix.shape)
+        # print(audio_sources.shape)
         return audio_mix, audio_sources
 
     def __len__(self):
@@ -156,8 +158,8 @@ class MIMIIDataset(torch.utils.data.Dataset):
         """Loads input and output tracks"""
         ids = ["id_00", "id_02", "id_04", "id_06"]
         p = Path(self.root, self.split)
-        # print(p)
-        for track_path in tqdm.tqdm(p.glob('fan/*/normal/*.wav')):
+        for track_path in tqdm.tqdm(p.glob('fan/id_00/normal/*.wav')):
+            # print(track_path)
             if self.subset and track_path.stem not in self.subset:
                 # skip this track
                 continue
@@ -177,9 +179,9 @@ class MIMIIDataset(torch.utils.data.Dataset):
                 # get minimum duration of track
                 min_duration = min(i.duration for i in infos)
                 if min_duration > self.segment:
-                    yield ({"path": track_path, "min_duration": min_duration})
+                    yield ({"path": track_path, "min_duration": min_duration, "source_paths": source_paths})
             else:
-                yield ({"path": track_path, "min_duration": None})
+                yield ({"path": track_path, "min_duration": None, "source_paths": source_paths})
 
     def get_infos(self):
         """Get dataset infos (for publishing models).

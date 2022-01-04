@@ -464,7 +464,10 @@ def main(conf, args):
         distributed_backend=distributed_backend,
         limit_train_batches=1.0,  # Useful for fast experiment
     )
-    trainer.fit(system)
+    try:
+        trainer.fit(system)
+    except KeyboardInterrupt:
+        pass
 
     best_k = {k: v.item() for k, v in checkpoint.best_k_models.items()}
     with open(os.path.join(exp_dir, "best_k_models.json"), "w") as f:
