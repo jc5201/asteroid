@@ -2,14 +2,13 @@ from asteroid.data import MIMIIDataset
 import torch
 from pathlib import Path
 
-train_tracks = [f"{n:0>8}" for n in range(24)]
+train_tracks = [f"{n:0>8}" for n in range(10, 410)]
 
 validation_tracks = [
     "00000000",
     "00000001",
     "00000002",
     "00000003",
-    "00000004",
 ]
 
 
@@ -31,7 +30,7 @@ def load_datasets(parser, args):
     )
 
     train_dataset = MIMIIDataset(
-        split="0dB",
+        split=args.split,
         subset=train_tracks,
         sources=args.sources,
         targets=args.sources,
@@ -46,11 +45,11 @@ def load_datasets(parser, args):
     train_dataset = filtering_out_valid(train_dataset)
 
     valid_dataset = MIMIIDataset(
-        split="0dB",
+        split=args.split,
         subset=validation_tracks,
         sources=args.sources,
         targets=args.sources,
-        segment=None,
+        segment=args.val_dur,
         **dataset_kwargs,
     )
 

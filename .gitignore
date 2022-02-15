@@ -4,6 +4,9 @@ egs/**/exp
 # Where we'll save pretrained models git folders.
 pretrained_models
 
+egs/mimii/X-UMX/x-umx*
+egs/mimii/X-UMX/output*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

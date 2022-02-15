@@ -5,6 +5,8 @@ import torch
 import tqdm
 import soundfile as sf
 
+from torchaudio import transforms
+
 
 class MIMIIDataset(torch.utils.data.Dataset):
     """MUSDB18 music separation dataset
@@ -64,7 +66,7 @@ class MIMIIDataset(torch.utils.data.Dataset):
         "The 2018 Signal Separation Evaluation Campaign" Stoter et al. 2018.
     """
 
-    dataset_name = "MUSDB18"
+    dataset_name = "MIMII"
 
     def __init__(
         self,
@@ -136,29 +138,43 @@ class MIMIIDataset(torch.utils.data.Dataset):
                 stop=stop_sample,
             )
             # convert to torch tensor
-            audio = torch.tensor(audio.T, dtype=torch.float)[:2, :]
+            audio = torch.tensor(audio.T, dtype=torch.float)[:, :]
             # apply source-wise augmentations
             audio = self.source_augmentations(audio)
             audio_sources[source] = audio
 
         # apply linear mix over source index=0
-        audio_mix = torch.stack(list(audio_sources.values())).sum(0)
+        # make mixture for i-th channel and use 0-th chnnel as gt
+        audioes = torch.stack([audio_sources[src] for src in self.targets])
+        # audioes = torch.stack(list(audio_sources.values()))
+        audio_mix = torch.stack([audioes[i, 2 * i : 2 * i + 2, :] for i in range(4)]).sum(0)
+        # audio_mix = torch.stack(list(audio_sources.values())).sum(0)
         if self.targets:
-            audio_sources = torch.stack(
-                [wav for src, wav in audio_sources.items() if src in self.targets], dim=0
-            )
-        # print(audio_mix.shape)
-        # print(audio_sources.shape)
-        return audio_mix, audio_sources
+            # audio_sources = torch.stack(
+            #     [wav[0:2, :] for src, wav in audio_sources.items() if src in self.targets], dim=0
+            # )
+            audio_sources = audioes[:, 0:2, :]
+
+        # feature_extractor = transforms.MFCC(sample_rate=16000)
+        # control_signals = [
+        #     feature_extractor(single) for single in audio_sources
+        # ]
+        # control_signals = torch.stack(control_signals, dim=0)
+        return audio_mix, torch.cat([audio_mix.unsqueeze(0), audio_sources], dim=0)
+        # return audio_mix, control_signals, audio_sources
 
     def __len__(self):
         return len(self.tracks) * self.samples_per_track
 
     def get_tracks(self):
         """Loads input and output tracks"""
-        ids = ["id_00", "id_02", "id_04", "id_06"]
+        ids = ["id_00", "id_02", "id_04"]
         p = Path(self.root, self.split)
-        for track_path in tqdm.tqdm(p.glob('fan/id_00/normal/*.wav')):
+        pp = []
+        for id in ids:
+            pp.extend(p.glob(f'fan/{id}/normal/*.wav'))
+        
+        for track_path in tqdm.tqdm(pp):
             # print(track_path)
             if self.subset and track_path.stem not in self.subset:
                 # skip this track
