@@ -86,7 +86,10 @@ def freq_domain_loss(s_hat, gt_spec, combination=True):
     refrences = []
     for i, s in enumerate(s_hat):
         inferences.append(s)
-        refrences.append(gt_spec[..., 2 * i : 2 * i + 2, :])
+        if s_hat.shape[3] == 1:
+            refrences.append(gt_spec[..., i : i + 1, :])
+        else:
+            refrences.append(gt_spec[..., 2 * i : 2 * i + 2, :])
     assert inferences[0].shape == refrences[0].shape
 
     _loss_mse = 0.0

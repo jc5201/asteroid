@@ -168,7 +168,8 @@ class MIMIIDataset(torch.utils.data.Dataset):
 
     def get_tracks(self):
         """Loads input and output tracks"""
-        ids = ["id_00", "id_02", "id_04"]
+        ids = ["id_02"]
+        # ids = ["id_00", "id_02", "id_04"]
         p = Path(self.root, self.split)
         pp = []
         for id in ids:
