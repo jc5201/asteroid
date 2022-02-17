@@ -6,6 +6,9 @@ pretrained_models
 
 egs/mimii/X-UMX/x-umx*
 egs/mimii/X-UMX/output*
+egs/mimii_single/X-UMX/output*
+
+.vscode*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
