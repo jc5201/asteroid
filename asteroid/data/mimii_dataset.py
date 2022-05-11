@@ -82,6 +82,7 @@ class MIMIIDataset(torch.utils.data.Dataset):
         random_track_mix=False,
         source_augmentations=lambda audio: audio,
         sample_rate=16000,
+        normal=True,
     ):
 
         self.root = Path(root).expanduser()
@@ -99,6 +100,8 @@ class MIMIIDataset(torch.utils.data.Dataset):
         self.tracks = list(self.get_tracks())
         if not self.tracks:
             raise RuntimeError("No tracks found.")
+
+        self.normal = normal
 
     def __getitem__(self, index):
         # assemble the mixture of target and interferers
@@ -155,25 +158,24 @@ class MIMIIDataset(torch.utils.data.Dataset):
             # )
             audio_sources = audioes[:, 0:2, :]
 
-        # feature_extractor = transforms.MFCC(sample_rate=16000)
-        # control_signals = [
-        #     feature_extractor(single) for single in audio_sources
-        # ]
-        # control_signals = torch.stack(control_signals, dim=0)
-        return audio_mix, torch.cat([audio_mix.unsqueeze(0), audio_sources], dim=0)
-        # return audio_mix, control_signals, audio_sources
+        feature_extractor = transforms.MFCC(sample_rate=16000)
+        control_signals = [
+            feature_extractor(single) for single in audio_sources
+        ]
+        control_signals = torch.stack(control_signals, dim=0)
+        # return audio_mix, torch.cat([audio_mix.unsqueeze(0), audio_sources], dim=0)
+        return audio_mix, control_signals, torch.cat([audio_mix.unsqueeze(0), audio_sources], dim=0)
 
     def __len__(self):
         return len(self.tracks) * self.samples_per_track
 
     def get_tracks(self):
         """Loads input and output tracks"""
-        ids = ["id_02"]
-        # ids = ["id_00", "id_02", "id_04"]
+        ids = ["id_00", "id_02", "id_04"]
         p = Path(self.root, self.split)
         pp = []
         for id in ids:
-            pp.extend(p.glob(f'fan/{id}/normal/*.wav'))
+            pp.extend(p.glob(f'fan/{id}/{"normal" if self.normal else "abnormal"}/*.wav'))
         
         for track_path in tqdm.tqdm(pp):
             # print(track_path)
@@ -199,18 +201,3 @@ class MIMIIDataset(torch.utils.data.Dataset):
                     yield ({"path": track_path, "min_duration": min_duration, "source_paths": source_paths})
             else:
                 yield ({"path": track_path, "min_duration": None, "source_paths": source_paths})
-
-    def get_infos(self):
-        """Get dataset infos (for publishing models).
-
-        Returns:
-            dict, dataset infos with keys `dataset`, `task` and `licences`.
-        """
-        infos = dict()
-        infos["dataset"] = self.dataset_name
-        infos["task"] = "enhancement"
-        infos["licenses"] = [musdb_license]
-        return infos
-
-
-musdb_license = dict()
