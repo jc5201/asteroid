@@ -86,10 +86,7 @@ def freq_domain_loss(s_hat, gt_spec, combination=True):
     refrences = []
     for i, s in enumerate(s_hat):
         inferences.append(s)
-        if s_hat.shape[3] == 1:
-            refrences.append(gt_spec[..., i : i + 1, :])
-        else:
-            refrences.append(gt_spec[..., 2 * i : 2 * i + 2, :])
+        refrences.append(gt_spec[..., 2 * i : 2 * i + 2, :])
     assert inferences[0].shape == refrences[0].shape
 
     _loss_mse = 0.0
@@ -338,6 +335,15 @@ class XUMXManager(System):
         super().__init__(model, optimizer, loss_func, train_loader, val_loader, scheduler, config)
         self.val_dur_samples = model.sample_rate * val_dur
 
+    def common_step(self, batch, batch_nb, train=True, return_est=False):
+        inputs, targets = batch
+        est_targets = self(inputs)
+        loss = self.loss_func(est_targets, targets)
+        if return_est:
+            return loss, est_targets.detach().clone()
+        else:
+            return loss
+
     def validation_step(self, batch, batch_nb):
         """
         We calculate the ``validation loss'' by splitting each song into
@@ -350,19 +356,29 @@ class XUMXManager(System):
         dur_samples = int(self.val_dur_samples)
         cnt = 0
         loss_tmp = 0.0
+        sdr_tmp = 0.0
 
         while 1:
+            input = batch[0][Ellipsis, sp : sp + dur_samples]
+            gt = batch[1][Ellipsis, sp : sp + dur_samples]
             batch_tmp = [
-                batch[0][Ellipsis, sp : sp + dur_samples],
-                batch[1][Ellipsis, sp : sp + dur_samples],
+                input,  # input
+                gt,  # target
             ]
-            loss_tmp += self.common_step(batch_tmp, batch_nb, train=False)
+            loss_step, est_step = self.common_step(batch_tmp, batch_nb, train=False, return_est=True)
+            loss_tmp += loss_step
             cnt += 1
             sp += dur_samples
+
+            sdr_tmp += weighted_sdr(est_step, gt, input, weighted=False).mean().detach().cpu().item()
+
             if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
         loss = loss_tmp / cnt
+        sdr = sdr_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
+        self.log("val_sdr", sdr, on_epoch=True, prog_bar=True)
+
 
 
 def main(conf, args):
@@ -467,10 +483,7 @@ def main(conf, args):
         distributed_backend=distributed_backend,
         limit_train_batches=1.0,  # Useful for fast experiment
     )
-    try:
-        trainer.fit(system)
-    except KeyboardInterrupt:
-        pass
+    trainer.fit(system)
 
     best_k = {k: v.item() for k, v in checkpoint.best_k_models.items()}
     with open(os.path.join(exp_dir, "best_k_models.json"), "w") as f:
