@@ -338,9 +338,9 @@ class XUMXManager(System):
     def common_step(self, batch, batch_nb, train=True, return_est=False):
         inputs, targets = batch
         est_targets = self(inputs)
-        loss = self.loss_func(est_targets, targets)
+        loss = self.loss_func(est_targets, targets, return_est=return_est)
         if return_est:
-            return loss, est_targets.detach().clone()
+            return loss, est_targets
         else:
             return loss
 
@@ -370,7 +370,32 @@ class XUMXManager(System):
             cnt += 1
             sp += dur_samples
 
-            sdr_tmp += weighted_sdr(est_step, gt, input, weighted=False).mean().detach().cpu().item()
+            ###
+            targets = gt
+            spec_hat, time_hat = est_step
+            
+            n_src, n_batch, n_channel, time_length = time_hat.shape
+            targets = targets[..., :time_length]
+            targets = targets.view(n_batch, n_src * n_channel, time_length)
+            mixture_t = sum([targets[:, 2 * i : 2 * i + 2, ...] for i in range(n_src)])
+
+            # Fix Length
+            mix = mixture_t[Ellipsis, :time_length]
+            gt_time = targets[Ellipsis, :time_length]
+
+            # Prepare Data and Fix Shape
+            mix_ref = [mix]
+            mix_ref.extend([gt_time[..., 2 * i : 2 * i + 2, :] for i in range(n_src)])
+            mix_ref = torch.stack(mix_ref)
+            mix_ref = mix_ref.view(-1, time_length)
+            time_hat = time_hat.view(n_batch * n_channel * time_hat.shape[0], time_hat.shape[-1])
+
+            mix_t = mix_ref[: n_batch * n_channel, Ellipsis].repeat(n_src, 1)
+            refrences_t = mix_ref[n_batch * n_channel :, Ellipsis]
+
+            # Calculation
+            _loss_sdr = weighted_sdr(time_hat, refrences_t, mix_t)
+            sdr_tmp += _loss_sdr
 
             if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
@@ -422,7 +447,7 @@ def main(conf, args):
         bidirectional=args.bidirectional,
         sample_rate=train_dataset.sample_rate,
         spec_power=args.spec_power,
-        return_time_signals=True if args.loss_use_multidomain else False,
+        return_time_signals=True,
     )
 
     optimizer = make_optimizer(

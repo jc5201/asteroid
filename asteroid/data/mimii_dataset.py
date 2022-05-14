@@ -97,11 +97,11 @@ class MIMIIDataset(torch.utils.data.Dataset):
         self.suffix = suffix
         self.subset = subset
         self.samples_per_track = samples_per_track
+        self.normal = normal
         self.tracks = list(self.get_tracks())
         if not self.tracks:
             raise RuntimeError("No tracks found.")
 
-        self.normal = normal
 
     def __getitem__(self, index):
         # assemble the mixture of target and interferers
@@ -158,13 +158,14 @@ class MIMIIDataset(torch.utils.data.Dataset):
             # )
             audio_sources = audioes[:, 0:2, :]
 
-        feature_extractor = transforms.MFCC(sample_rate=16000)
-        control_signals = [
-            feature_extractor(single) for single in audio_sources
-        ]
-        control_signals = torch.stack(control_signals, dim=0)
+        # feature_extractor = transforms.MFCC(sample_rate=16000)
+        # control_signals = [
+        #     feature_extractor(single) for single in audio_sources
+        # ]
+        # control_signals = torch.stack(control_signals, dim=0)
+        # return audio_mix, control_signals, torch.cat([audio_mix.unsqueeze(0), audio_sources], dim=0)
         # return audio_mix, torch.cat([audio_mix.unsqueeze(0), audio_sources], dim=0)
-        return audio_mix, control_signals, torch.cat([audio_mix.unsqueeze(0), audio_sources], dim=0)
+        return audio_mix, audio_sources
 
     def __len__(self):
         return len(self.tracks) * self.samples_per_track
