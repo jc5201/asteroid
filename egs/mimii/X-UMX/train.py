@@ -7,6 +7,7 @@ import tqdm
 import itertools
 import numpy as np
 import sklearn.preprocessing
+import museval
 
 import torch
 import pytorch_lightning as pl
@@ -373,29 +374,18 @@ class XUMXManager(System):
             ###
             targets = gt
             spec_hat, time_hat = est_step
+
             
             n_src, n_batch, n_channel, time_length = time_hat.shape
-            targets = targets[..., :time_length]
-            targets = targets.view(n_batch, n_src * n_channel, time_length)
-            mixture_t = sum([targets[:, 2 * i : 2 * i + 2, ...] for i in range(n_src)])
+            assert n_batch == 1
+            time_hat = time_hat.view(n_src, time_length, n_channel)
 
-            # Fix Length
-            mix = mixture_t[Ellipsis, :time_length]
-            gt_time = targets[Ellipsis, :time_length]
+            targets = targets[:, :, :, :time_length]
+            targets = targets.squeeze(0).permute(0, 2, 1)
 
-            # Prepare Data and Fix Shape
-            mix_ref = [mix]
-            mix_ref.extend([gt_time[..., 2 * i : 2 * i + 2, :] for i in range(n_src)])
-            mix_ref = torch.stack(mix_ref)
-            mix_ref = mix_ref.view(-1, time_length)
-            time_hat = time_hat.view(n_batch * n_channel * time_hat.shape[0], time_hat.shape[-1])
+            sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
 
-            mix_t = mix_ref[: n_batch * n_channel, Ellipsis].repeat(n_src, 1)
-            refrences_t = mix_ref[n_batch * n_channel :, Ellipsis]
-
-            # Calculation
-            _loss_sdr = weighted_sdr(time_hat, refrences_t, mix_t)
-            sdr_tmp += _loss_sdr
+            sdr_tmp += np.mean(sdr)
 
             if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
