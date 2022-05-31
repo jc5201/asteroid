@@ -358,6 +358,7 @@ class XUMXManager(System):
         cnt = 0
         loss_tmp = 0.0
         sdr_tmp = 0.0
+        sdri_tmp = 0.0
 
         while 1:
             input = batch[0][Ellipsis, sp : sp + dur_samples]
@@ -373,6 +374,7 @@ class XUMXManager(System):
 
             ###
             targets = gt
+            mixture = input
             spec_hat, time_hat = est_step
 
             
@@ -383,16 +385,24 @@ class XUMXManager(System):
             targets = targets[:, :, :, :time_length]
             targets = targets.squeeze(0).permute(0, 2, 1)
 
+            mixture = mixture[:, :, :time_length]
+            mixture = mixture.permute(0, 2, 1)
+            mixture = mixture.repeat(n_src, 1, 1)
+
+            sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
             sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
 
             sdr_tmp += np.mean(sdr)
+            sdri_tmp += np.mean(sdr - sdr_mix)
 
             if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
         loss = loss_tmp / cnt
         sdr = sdr_tmp / cnt
+        sdri = sdri_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
-        self.log("val_sdr", sdr, on_epoch=True, prog_bar=True)
+        self.log("val_SDR", sdr, on_epoch=True, prog_bar=True)
+        self.log("val_SDRi", sdri, on_epoch=True, prog_bar=True)
 
 
 
