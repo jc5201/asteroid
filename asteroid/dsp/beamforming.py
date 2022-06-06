@@ -476,7 +476,7 @@ def _generalized_eigenvalue_decomposition(a, b):
 _to_double_map = {
     torch.float16: torch.float64,
     torch.float32: torch.float64,
-    torch.complex32: torch.complex128,
+    # torch.complex32: torch.complex128,
     torch.complex64: torch.complex128,
 }
 
