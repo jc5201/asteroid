@@ -40,6 +40,7 @@ def load_datasets(parser, args):
         random_segments=True,
         sample_rate=args.sample_rate,
         samples_per_track=args.samples_per_track,
+        use_control=True,
         **dataset_kwargs,
     )
     train_dataset = filtering_out_valid(train_dataset)
@@ -50,6 +51,7 @@ def load_datasets(parser, args):
         sources=args.sources,
         targets=args.sources,
         segment=args.val_dur,
+        use_control=True,
         **dataset_kwargs,
     )
 

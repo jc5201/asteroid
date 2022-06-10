@@ -15,7 +15,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
 from asteroid.engine.system import System
 from asteroid.engine.optimizers import make_optimizer
-from asteroid.models import XUMX
+from asteroid.models import XUMXControl
 from asteroid.models.x_umx import _STFT, _Spectrogram
 from asteroid.losses import singlesrc_mse
 from torch.nn.modules.loss import _Loss
@@ -54,7 +54,7 @@ def get_statistics(args, dataset):
     dataset_scaler.segment = False
     pbar = tqdm.tqdm(range(len(dataset_scaler)))
     for ind in pbar:
-        x, _ = dataset_scaler[ind]
+        x, _, _ = dataset_scaler[ind]
         pbar.set_description("Compute dataset statistics")
         X = spec(x[None, ...])[0]
         scaler.partial_fit(np.squeeze(X))
@@ -337,8 +337,8 @@ class XUMXManager(System):
         self.val_dur_samples = model.sample_rate * val_dur
 
     def common_step(self, batch, batch_nb, train=True, return_est=False):
-        inputs, targets = batch
-        est_targets = self(inputs)
+        inputs, targets, labels = batch
+        est_targets = self(inputs, labels)
         loss = self.loss_func(est_targets, targets, return_est=return_est)
         if return_est:
             return loss, est_targets
@@ -363,9 +363,11 @@ class XUMXManager(System):
         while 1:
             input = batch[0][Ellipsis, sp : sp + dur_samples]
             gt = batch[1][Ellipsis, sp : sp + dur_samples]
+            label = batch[2][Ellipsis, sp : sp + dur_samples]
             batch_tmp = [
                 input,  # input
                 gt,  # target
+                label,
             ]
             loss_step, est_step = self.common_step(batch_tmp, batch_nb, train=False, return_est=True)
             loss_tmp += loss_step
@@ -437,7 +439,7 @@ def main(conf, args):
 
     max_bin = bandwidth_to_max_bin(train_dataset.sample_rate, args.in_chan, args.bandwidth)
 
-    x_unmix = XUMX(
+    x_unmix = XUMXControl(
         window_length=args.window_length,
         input_mean=scaler_mean,
         input_scale=scaler_std,
@@ -510,7 +512,7 @@ def main(conf, args):
         gpus=gpus,
         distributed_backend=distributed_backend,
         limit_train_batches=1.0,  # Useful for fast experiment
-        check_val_every_n_epoch=5,
+        # check_val_every_n_epoch=5,
     )
     trainer.fit(system)
 

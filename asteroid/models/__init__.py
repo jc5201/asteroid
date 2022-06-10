@@ -1,12 +1,14 @@
 # Models
 from .base_models import BaseModel
 from .x_umx import XUMX
+from .x_umx_control import XUMXControl
 
 # Sharing-related
 from .publisher import save_publishable, upload_publishable
 
 __all__ = [
     "XUMX",
+    "XUMXControl",
     "save_publishable",
     "upload_publishable",
 ]

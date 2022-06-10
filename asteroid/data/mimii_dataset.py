@@ -83,6 +83,7 @@ class MIMIIDataset(torch.utils.data.Dataset):
         source_augmentations=lambda audio: audio,
         sample_rate=16000,
         normal=True,
+        use_control=False,
     ):
 
         self.root = Path(root).expanduser()
@@ -101,11 +102,13 @@ class MIMIIDataset(torch.utils.data.Dataset):
         self.tracks = list(self.get_tracks())
         if not self.tracks:
             raise RuntimeError("No tracks found.")
+        self.use_control = use_control
 
 
     def __getitem__(self, index):
         # assemble the mixture of target and interferers
         audio_sources = {}
+        active_label_sources = {}
 
         # get track_id
         track_id = index // self.samples_per_track
@@ -144,6 +147,19 @@ class MIMIIDataset(torch.utils.data.Dataset):
             audio = torch.tensor(audio.T, dtype=torch.float)[:, :]
             # apply source-wise augmentations
             audio = self.source_augmentations(audio)
+
+            if self.use_control:
+                #apply mask
+                audio_len = audio.shape[1]
+                mask_len = random.randrange(audio_len//2)
+                start_point = random.randrange(0, audio_len - mask_len)
+                audio[:, start_point:start_point + mask_len] = 0
+
+                active_label = torch.ones_like(audio)
+                active_label[:, start_point:start_point + mask_len] = 0
+                active_label_sources[source] = active_label
+                # [channel, time]
+
             audio_sources[source] = audio
 
         # apply linear mix over source index=0
@@ -157,14 +173,16 @@ class MIMIIDataset(torch.utils.data.Dataset):
             #     [wav[0:2, :] for src, wav in audio_sources.items() if src in self.targets], dim=0
             # )
             audio_sources = audioes[:, 0:2, :]
+        
+        
+        if self.use_control:
+            active_labels = torch.stack([active_label_sources[src] for src in self.targets])
+            # [source, channel, time]
+            if self.targets:
+                active_labels = active_labels[:, 0:2, :]
+            return audio_mix, audio_sources, active_labels
 
-        # feature_extractor = transforms.MFCC(sample_rate=16000)
-        # control_signals = [
-        #     feature_extractor(single) for single in audio_sources
-        # ]
-        # control_signals = torch.stack(control_signals, dim=0)
-        # return audio_mix, control_signals, torch.cat([audio_mix.unsqueeze(0), audio_sources], dim=0)
-        # return audio_mix, torch.cat([audio_mix.unsqueeze(0), audio_sources], dim=0)
+
         return audio_mix, audio_sources
 
     def __len__(self):
