@@ -392,8 +392,8 @@ class XUMXManager(System):
             sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
             sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
 
-            sdr_tmp += np.mean(sdr)
-            sdri_tmp += np.mean(sdr - sdr_mix)
+            sdr_tmp += np.mean(sdr, axis=1)
+            sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
 
             if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
@@ -401,8 +401,11 @@ class XUMXManager(System):
         sdr = sdr_tmp / cnt
         sdri = sdri_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
-        self.log("val_SDR", sdr, on_epoch=True, prog_bar=True)
-        self.log("val_SDRi", sdri, on_epoch=True, prog_bar=True)
+        for i, src in enumerate(["fan", "pump", "slider", "valve"]):
+            self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
+            self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
+        self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
+        self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
 
 
 
@@ -507,6 +510,7 @@ def main(conf, args):
         gpus=gpus,
         distributed_backend=distributed_backend,
         limit_train_batches=1.0,  # Useful for fast experiment
+        check_val_every_n_epoch=5,
     )
     trainer.fit(system)
 
