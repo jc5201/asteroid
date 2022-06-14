@@ -143,7 +143,7 @@ class XUMX(BaseModel):
         # Define spectral decoder
         self.decoder = _ISTFT(window=stft.window, n_fft=in_chan, hop_length=n_hop, center=True)
 
-    def forward(self, wav):
+    def forward(self, wav, return_mixture=False):
         """Model forward
 
         Args:
@@ -170,6 +170,8 @@ class XUMX(BaseModel):
         else:
             time_signals = None
 
+        if return_mixture:
+            return masked_mixture, time_signals, mixture    
         return masked_mixture, time_signals
 
     def forward_masker(self, input_spec):
