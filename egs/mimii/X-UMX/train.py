@@ -375,6 +375,7 @@ class XUMXManager(System):
             sp += dur_samples
 
             ###
+            if self.current_epoch % 10 == 0:
             targets = gt
             mixture = input
             spec_hat, time_hat = est_step
@@ -400,9 +401,10 @@ class XUMXManager(System):
             if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
         loss = loss_tmp / cnt
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True)
+        if self.current_epoch % 10 == 0:
         sdr = sdr_tmp / cnt
         sdri = sdri_tmp / cnt
-        self.log("val_loss", loss, on_epoch=True, prog_bar=True)
         for i, src in enumerate(["fan", "pump", "slider", "valve"]):
             self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
             self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
