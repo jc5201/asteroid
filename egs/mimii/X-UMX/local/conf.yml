@@ -28,10 +28,9 @@ data:
     - gain
     - channelswap
   sources:
-    - fan
-    - pump
-    - slider
-    - valve
+    - id_00
+    - id_02
+
   use_control: True
 # Network config
 model:

@@ -7,6 +7,7 @@ import soundfile as sf
 
 from torchaudio import transforms
 import librosa
+from itertools import product
 
 class MIMIIValveDataset(torch.utils.data.Dataset):
     """MUSDB18 music separation dataset
@@ -103,7 +104,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         if not self.tracks:
             raise RuntimeError("No tracks found.")
         self.use_control = use_control 
-        self.cache = {index:{"audio_mix": None, "audio_sources": None, "active_labels": None} for index in range(len(self.tracks) * self.samples_per_track)}  
+        self.normal = True
 
     def __getitem__(self, index):
        
@@ -163,20 +164,29 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
                 rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
                 # [channel, time]
 
-                k = int(audio.shape[1]*0.75)
-                min_threshold, _ = torch.kthvalue(rms_trim, k)
+                if self.normal:
+                    k = int(audio.shape[1]*0.75)
+                    min_threshold, _ = torch.kthvalue(rms_trim, k)
 
-                label = torch.as_tensor([0 if j < min_threshold else 1 for j in rms_trim[0, :]])
-                label = label.expand(audio.shape[0], -1)
-                active_label_sources[source] = label
+                    label = torch.as_tensor([0 if j < min_threshold else 1 for j in rms_trim[0, :]])
+                    label = label.expand(audio.shape[0], -1)
+                    active_label_sources[source] = label
+
+                else:
+                    label = random.choices([0,1], k=10)
+                    label = label.expand(audio.shape[1])
+                    label = label.expand(audio.shape[0], -1)
+                    active_label_sources[source] = label
 
         # apply linear mix over source index=0
         # make mixture for i-th channel and use 0-th chnnel as gt
         audioes = torch.stack([audio_sources[src] for src in self.targets])
-        audio_mix = torch.stack([audioes[i, 2 * i : 2 * i + 2, :] for i in range(4)]).sum(0)
-        
+        audio_mix = torch.stack([audioes[i, 2 * i : 2 * i + 2, :] for i in range(len(self.sources))]).sum(0)
+
+        #use different channel for two different valves
         if self.targets:
             audio_sources = audioes[:, 0:2, :]
+            audio_sources[1, :, :] = audioes[1, 2:4, :]
 
         if self.use_control:
             active_labels = torch.stack([active_label_sources[src] for src in self.targets])
