@@ -157,20 +157,18 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
             #[channel, time]
             
             if self.use_control:
-                label = torch.empty_like(audio)
                 rms_fig = librosa.feature.rms(audio) #[1, 313]
                 rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1) 
                 # [channel, time, 1]
-                rms_trim = rms_tensor.expand(audio.shape[0], -1, 512).reshape(audio.shape[0], -1)[:, :160000]
+                rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
                 # [channel, time]
 
-                k = int(rms_trim.shape[1]*0.25)
+                k = int(audio.shape[1]*0.75)
                 min_threshold, _ = torch.kthvalue(rms_trim, k)
-                
-                for i in range(rms_trim.shape[0]):
-                    label[i, :] = torch.as_tensor([0 if j < min_threshold[i] else 1 for j in rms_trim[i, :]])
-                active_label_sources[source] = label
 
+                label = torch.as_tensor([0 if j < min_threshold else 1 for j in rms_trim[0, :]])
+                label = label.expand(audio.shape[0], -1)
+                active_label_sources[source] = label
 
         # apply linear mix over source index=0
         # make mixture for i-th channel and use 0-th chnnel as gt

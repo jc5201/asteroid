@@ -102,11 +102,17 @@ class MIMIIDataset(torch.utils.data.Dataset):
         self.tracks = list(self.get_tracks())
         if not self.tracks:
             raise RuntimeError("No tracks found.")
-        self.use_control = use_control
-
+        self.use_control = use_control 
+        self.cache = {index:{"audio_mix": None, "audio_sources": None, "active_labels": None} for index in range(len(self.tracks) * self.samples_per_track)}  
 
     def __getitem__(self, index):
         # assemble the mixture of target and interferers
+        # if self.cache[index]["audio_mix"] != None:
+        #     audio_mix = self.cache[index]["audio_mix"]
+        #     audio_sources = self.cache[index]["audio_sources"]
+        #     active_labels = self.cache[index]["active_labels"]
+        #     return audio_mix, audio_sources, active_labels
+
         audio_sources = {}
         active_label_sources = {}
 
@@ -148,38 +154,58 @@ class MIMIIDataset(torch.utils.data.Dataset):
             # apply source-wise augmentations
             audio = self.source_augmentations(audio)
 
+            #apply mask
+            audio_len = audio.shape[1]
+            mask_len = random.randrange(audio_len//2)
+            start_point = random.randrange(0, audio_len - mask_len)
+            audio[:, start_point:start_point + mask_len] = 0
+            audio_sources[source] = audio
+            
             if self.use_control:
-                #apply mask
-                audio_len = audio.shape[1]
-                mask_len = random.randrange(audio_len//2)
-                start_point = random.randrange(0, audio_len - mask_len)
-                audio[:, start_point:start_point + mask_len] = 0
-
                 active_label = torch.ones_like(audio)
                 active_label[:, start_point:start_point + mask_len] = 0
                 active_label_sources[source] = active_label
                 # [channel, time]
 
-            audio_sources[source] = audio
+                # #make mean label
+                # dur_chunk = audio_len//1000
+                # audio_threashold = 0.01
+                # active_label = torch.empty((2, dur_chunk))
+                # num_chunk = audio_len//dur_chunk
+                # if audio_len % dur_chunk != 0:
+                #     num_chunk = num_chunk + 1
+                
+                # for i in range(num_chunk):
+                #     chunk = audio[:, i*dur_chunk:(i+1)*dur_chunk]
+                #     chunk_label = torch.empty_like(chunk[:2, :])
+                #     for j in range(2):
+                #         if torch.mean(torch.abs(chunk[j, :])) < audio_threashold:
+                #             chunk_label[j, :] = torch.zeros_like(chunk[j, :])              
+                #         else:
+                #             chunk_label[j, :] = torch.ones_like(chunk[j, :])
+                #     active_label = torch.cat((active_label, chunk_label), dim = 1)
+                # active_label_sources[source] = active_label[:, dur_chunk:]
+
+            
 
         # apply linear mix over source index=0
         # make mixture for i-th channel and use 0-th chnnel as gt
         audioes = torch.stack([audio_sources[src] for src in self.targets])
-        # audioes = torch.stack(list(audio_sources.values()))
         audio_mix = torch.stack([audioes[i, 2 * i : 2 * i + 2, :] for i in range(4)]).sum(0)
-        # audio_mix = torch.stack(list(audio_sources.values())).sum(0)
+        
         if self.targets:
-            # audio_sources = torch.stack(
-            #     [wav[0:2, :] for src, wav in audio_sources.items() if src in self.targets], dim=0
-            # )
             audio_sources = audioes[:, 0:2, :]
-        
-        
+
         if self.use_control:
             active_labels = torch.stack([active_label_sources[src] for src in self.targets])
             # [source, channel, time]
             if self.targets:
                 active_labels = active_labels[:, 0:2, :]
+
+            # self.cache[index]["audio_mix"] = audio_mix
+            # self.cache[index]["audio_sources"] = audio_sources
+            # self.cache[index]["active_labels"] = active_labels
+
             return audio_mix, audio_sources, active_labels
 
 

@@ -15,7 +15,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
 from asteroid.engine.system import System
 from asteroid.engine.optimizers import make_optimizer
-from asteroid.models import XUMXControl
+from asteroid.models import XUMXControl, XUMX
 from asteroid.models.x_umx import _STFT, _Spectrogram
 from asteroid.losses import singlesrc_mse
 from torch.nn.modules.loss import _Loss
@@ -25,6 +25,9 @@ from local import dataloader
 from pathlib import Path
 from operator import itemgetter
 
+from pytorch_lightning.loggers import WandbLogger
+import wandb 
+
 # Keys which are not in the conf.yml file can be added here.
 # In the hierarchical dictionary created when parsing, the key `key` can be
 # found at dic['main_args'][key]
@@ -32,6 +35,7 @@ from operator import itemgetter
 # By default train.py will use all available GPUs.
 parser = argparse.ArgumentParser()
 
+os.environ["CUDA_VISIBLE_DEVICES"]= "3"
 
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
@@ -54,7 +58,7 @@ def get_statistics(args, dataset):
     dataset_scaler.segment = False
     pbar = tqdm.tqdm(range(len(dataset_scaler)))
     for ind in pbar:
-        x, _, _ = dataset_scaler[ind]
+        x, _= dataset_scaler[ind]
         pbar.set_description("Compute dataset statistics")
         X = spec(x[None, ...])[0]
         scaler.partial_fit(np.squeeze(X))
@@ -337,8 +341,8 @@ class XUMXManager(System):
         self.val_dur_samples = model.sample_rate * val_dur
 
     def common_step(self, batch, batch_nb, train=True, return_est=False):
-        inputs, targets, labels = batch
-        est_targets = self(inputs, labels)
+        inputs, targets = batch
+        est_targets = self(inputs)
         loss = self.loss_func(est_targets, targets, return_est=return_est)
         if return_est:
             return loss, est_targets
@@ -363,11 +367,9 @@ class XUMXManager(System):
         while 1:
             input = batch[0][Ellipsis, sp : sp + dur_samples]
             gt = batch[1][Ellipsis, sp : sp + dur_samples]
-            label = batch[2][Ellipsis, sp : sp + dur_samples]
             batch_tmp = [
                 input,  # input
                 gt,  # target
-                label,
             ]
             loss_step, est_step = self.common_step(batch_tmp, batch_nb, train=False, return_est=True)
             loss_tmp += loss_step
@@ -404,8 +406,24 @@ class XUMXManager(System):
         sdri = sdri_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
         for i, src in enumerate(["fan", "pump", "slider", "valve"]):
+            audio = np.array(time_hat[i, :, :].reshape(-1,1).detach().cpu())
+            gt_audio = np.array(targets[i, :, :].reshape(-1,1).detach().cpu())
+            mixture_audio = np.array(mixture.reshape(-1,1).detach().cpu())
+
+            waveform_hat = torch.mean(time_hat[i, :, :].detach().cpu(), dim =  1).unsqueeze(1)
+            waveform_gt = torch.mean(targets[i, :, :].detach().cpu(), dim =1).unsqueeze(1)
+
+            self.logger.experiment.log({f"val_audio_{src}": [wandb.Audio(audio, sample_rate = 16000)]})
+            self.logger.experiment.log({f"gt_audio_{src}": [wandb.Audio(gt_audio, sample_rate = 16000)]})
+            self.logger.experiment.log({"mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
+            
+            self.log(f"val_wav_{src}", waveform_hat, on_epoch=True, prog_bar=True)
+            self.log(f"gt_wav_{src}", waveform_gt, on_epoch=True, prog_bar=True)
+            self.log(f"diff_{src}", waveform_gt - waveform_hat, on_epoch=True, prog_bar=True)
+
             self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
             self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
+           
         self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
         self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
 
@@ -439,7 +457,7 @@ def main(conf, args):
 
     max_bin = bandwidth_to_max_bin(train_dataset.sample_rate, args.in_chan, args.bandwidth)
 
-    x_unmix = XUMXControl(
+    x_unmix = XUMX(
         window_length=args.window_length,
         input_mean=scaler_mean,
         input_scale=scaler_std,
@@ -503,6 +521,7 @@ def main(conf, args):
     callbacks.append(es)
 
     # Don't ask GPU if they are not available.
+    wandb_logger = WandbLogger()
     gpus = -1 if torch.cuda.is_available() else None
     distributed_backend = "ddp" if torch.cuda.is_available() else None
     trainer = pl.Trainer(
@@ -512,7 +531,8 @@ def main(conf, args):
         gpus=gpus,
         distributed_backend=distributed_backend,
         limit_train_batches=1.0,  # Useful for fast experiment
-        # check_val_every_n_epoch=5,
+        logger = wandb_logger,
+        check_val_every_n_epoch=100,
     )
     trainer.fit(system)
 
