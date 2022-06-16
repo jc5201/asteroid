@@ -34,8 +34,6 @@ import wandb
 
 # By default train.py will use all available GPUs.
 parser = argparse.ArgumentParser()
-
-
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
 
@@ -57,7 +55,7 @@ def get_statistics(args, dataset):
     dataset_scaler.segment = False
     pbar = tqdm.tqdm(range(len(dataset_scaler)))
     for ind in pbar:
-        x, _= dataset_scaler[ind]
+        x, _, _ = dataset_scaler[ind]
         pbar.set_description("Compute dataset statistics")
         X = spec(x[None, ...])[0]
         scaler.partial_fit(np.squeeze(X))
@@ -340,8 +338,8 @@ class XUMXManager(System):
         self.val_dur_samples = model.sample_rate * val_dur
 
     def common_step(self, batch, batch_nb, train=True, return_est=False):
-        inputs, targets = batch
-        est_targets = self(inputs)
+        inputs, targets, labels = batch
+        est_targets = self(inputs, labels)
         loss = self.loss_func(est_targets, targets, return_est=return_est)
         if return_est:
             return loss, est_targets
@@ -366,62 +364,73 @@ class XUMXManager(System):
         while 1:
             input = batch[0][Ellipsis, sp : sp + dur_samples]
             gt = batch[1][Ellipsis, sp : sp + dur_samples]
+            label = batch[2][Ellipsis, sp : sp + dur_samples]
             batch_tmp = [
                 input,  # input
                 gt,  # target
+                label,
             ]
+
             loss_step, est_step = self.common_step(batch_tmp, batch_nb, train=False, return_est=True)
             loss_tmp += loss_step
             cnt += 1
             sp += dur_samples
 
             ###
-            if self.current_epoch % 10 == 0:
-                targets = gt
-                mixture = input
-                spec_hat, time_hat = est_step
+            targets = gt
+            mixture = input
+            spec_hat, time_hat = est_step
 
-                
-                n_src, n_batch, n_channel, time_length = time_hat.shape
-                assert n_batch == 1
-                time_hat = time_hat.view(n_src, time_length, n_channel)
+            
+            n_src, n_batch, n_channel, time_length = time_hat.shape
+            assert n_batch == 1
+            time_hat = time_hat.view(n_src, time_length, n_channel)
 
-                targets = targets[:, :, :, :time_length]
-                targets = targets.squeeze(0).permute(0, 2, 1)
+            targets = targets[:, :, :, :time_length]
+            targets = targets.squeeze(0).permute(0, 2, 1)
 
-                mixture = mixture[:, :, :time_length]
-                mixture = mixture.permute(0, 2, 1)
-                mixture = mixture.repeat(n_src, 1, 1)
+            mixture = mixture[:, :, :time_length]
+            mixture = mixture.permute(0, 2, 1)
+            mix_audio = mixture
+            mixture = mixture.repeat(n_src, 1, 1)
 
-                sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
-                sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
+            sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
+            sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
 
-                sdr_tmp += np.mean(sdr, axis=1)
-                sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
+            sdr_tmp += np.mean(sdr, axis=1)
+            sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
 
             if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
         loss = loss_tmp / cnt
+        sdr = sdr_tmp / cnt
+        sdri = sdri_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
-        
-        if self.current_epoch % 10 == 0:
-            sdr = sdr_tmp / cnt
-            sdri = sdri_tmp / cnt
+        for i, src in enumerate(["id_00", "id_02"]): #["fan", "pump", "slider", "valve"]
+           
+            self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
+            self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
 
-            for i, src in enumerate(["fan", "pump", "slider", "valve"]): # ["id_00", "id_02"]
-                audio = np.array(time_hat[i, :, :].reshape(-1,1).detach().cpu())
-                gt_audio = np.array(targets[i, :, :].reshape(-1,1).detach().cpu())
-                mixture_audio = np.array(mixture.reshape(-1,1).detach().cpu())
+            
 
-                self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
-                self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
+        valve1_hat = np.array(time_hat[0, :, :].reshape(-1,1).detach().cpu())
+        valve2_hat = np.array(time_hat[1, :, :].reshape(-1,1).detach().cpu())
 
-                self.logger.experiment.log({f"val_audio_{src}": [wandb.Audio(audio, sample_rate = 16000)],
-                f"gt_audio_{src}": [wandb.Audio(gt_audio, sample_rate = 16000)],
-                "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
-                
-            self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
-            self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
+        valve1_gt = np.array(targets[0, :, :].reshape(-1,1).detach().cpu())
+        valve2_gt = np.array(targets[1, :, :].reshape(-1,1).detach().cpu())
+
+        mixture_audio = np.array(mix_audio.reshape(-1,1).detach().cpu())
+
+        self.logger.experiment.log({"val_valve1": [wandb.Audio(valve1_hat, sample_rate = 16000)],
+            "gt_valve1": [wandb.Audio(valve1_gt, sample_rate = 16000)],
+            "val_valve2": [wandb.Audio(valve2_hat, sample_rate = 16000)],
+            "gt_valve2": [wandb.Audio(valve2_gt, sample_rate = 16000)],
+            "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
+
+         
+        self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
+        self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
+
 
 
 def main(conf, args):
@@ -452,7 +461,7 @@ def main(conf, args):
 
     max_bin = bandwidth_to_max_bin(train_dataset.sample_rate, args.in_chan, args.bandwidth)
 
-    x_unmix = XUMX(
+    x_unmix = XUMXControl(
         window_length=args.window_length,
         input_mean=scaler_mean,
         input_scale=scaler_std,
@@ -527,6 +536,7 @@ def main(conf, args):
         distributed_backend=distributed_backend,
         limit_train_batches=1.0,  # Useful for fast experiment
         logger = wandb_logger,
+        # check_val_every_n_epoch=5,
     )
     trainer.fit(system)
 

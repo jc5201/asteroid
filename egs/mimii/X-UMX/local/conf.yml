@@ -16,7 +16,7 @@ optim:
   weight_decay: 0.00001
 # Data config
 data:
-  train_dir: /home/kjc/mimii
+  train_dir: /hdd/hdd1/mimii
   split: 6dB
   output: x-umx_outputs
   sample_rate: 16000
@@ -28,10 +28,9 @@ data:
     - gain
     - channelswap
   sources:
-    - fan
-    - pump
-    - slider
-    - valve
+    - id_00
+    - id_02
+  use_control: True
 # Network config
 model:
   pretrained: null

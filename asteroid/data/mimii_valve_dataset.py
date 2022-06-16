@@ -7,8 +7,9 @@ import soundfile as sf
 
 from torchaudio import transforms
 import librosa
+from itertools import product
 
-class MIMIIDataset(torch.utils.data.Dataset):
+class MIMIIValveDataset(torch.utils.data.Dataset):
     """MUSDB18 music separation dataset
 
     Folder Structure:
@@ -71,7 +72,7 @@ class MIMIIDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         root,
-        sources=["fan", "pump", "slider", "valve"],
+        sources=["id_00", "id_02", "id_04", "id_06"],
         targets=None,
         suffix=".wav",
         split="0dB",
@@ -102,9 +103,9 @@ class MIMIIDataset(torch.utils.data.Dataset):
         self.tracks = list(self.get_tracks())
         if not self.tracks:
             raise RuntimeError("No tracks found.")
-        self.use_control = use_control
-        self.normal = True 
-        
+        self.use_control = use_control 
+        self.normal = True
+
     def __getitem__(self, index):
        
         audio_sources = {}
@@ -151,53 +152,51 @@ class MIMIIDataset(torch.utils.data.Dataset):
             #apply mask
             audio_len = audio.shape[1]
             mask_len = random.randrange(audio_len//2)
-            start_point = random.randrange(0, audio_len - mask_len)
-            torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.001, max=0.001)
-            audio_sources[source] = audio
+            if i == 0:
+                start_point = random.randrange(0, audio_len//2 - mask_len)
+            else:
+                start_point = random.randrange(audio_len//2, audio_len//2 - mask_len)
+            torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.01, max=0.01)
+            audio_sources[source] = audio  
+            #[channel, time]
             
             if self.use_control:
-                active_label = torch.ones_like(audio)
-                active_label[:, start_point:start_point + mask_len] = 0
-                active_label_sources[source] = active_label
+                rms_fig = librosa.feature.rms(audio) #[1, 313]
+                rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1) 
+                # [channel, time, 1]
+                rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
                 # [channel, time]
 
-                # #make mean label
-                # dur_chunk = audio_len//1000
-                # audio_threashold = 0.01
-                # active_label = torch.empty((2, dur_chunk))
-                # num_chunk = audio_len//dur_chunk
-                # if audio_len % dur_chunk != 0:
-                #     num_chunk = num_chunk + 1
-                
-                # for i in range(num_chunk):
-                #     chunk = audio[:, i*dur_chunk:(i+1)*dur_chunk]
-                #     chunk_label = torch.empty_like(chunk[:2, :])
-                #     for j in range(2):
-                #         if torch.mean(torch.abs(chunk[j, :])) < audio_threashold:
-                #             chunk_label[j, :] = torch.zeros_like(chunk[j, :])              
-                #         else:
-                #             chunk_label[j, :] = torch.ones_like(chunk[j, :])
-                #     active_label = torch.cat((active_label, chunk_label), dim = 1)
-                # active_label_sources[source] = active_label[:, dur_chunk:]
+                if self.normal:
+                    k = int(audio.shape[1]*0.75)
+                    min_threshold, _ = torch.kthvalue(rms_trim, k)
 
-            
+                    label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
+                    label = label.expand(audio.shape[0], -1)
+                    active_label_sources[source] = label
+                    #[channel, time]
+
+                else:
+                    label = random.choices([0,1], k=10)
+                    label = label.expand(audio.shape[1])
+                    label = label.expand(audio.shape[0], -1)
+                    active_label_sources[source] = label
 
         # apply linear mix over source index=0
         # make mixture for i-th channel and use 0-th chnnel as gt
         audioes = torch.stack([audio_sources[src] for src in self.targets])
         audio_mix = torch.stack([audioes[i, 2 * i : 2 * i + 2, :] for i in range(len(self.sources))]).sum(0)
-        
+
+        #use different channel for two different valves
         if self.targets:
             audio_sources = audioes[:, 0:2, :]
-            for i in range(len(self.sources)):
-                audio_sources[i, :, :] = audioes[i, 2 * i : 2 * i + 2, :]
+            audio_sources[1, :, :] = audioes[1, 2:4, :]
 
         if self.use_control:
             active_labels = torch.stack([active_label_sources[src] for src in self.targets])
             # [source, channel, time]
             if self.targets:
                 active_labels = active_labels[:, 0:2, :]
-
             return audio_mix, audio_sources, active_labels
 
 
@@ -208,11 +207,9 @@ class MIMIIDataset(torch.utils.data.Dataset):
 
     def get_tracks(self):
         """Loads input and output tracks"""
-        ids = ["id_00", "id_02", "id_04"]
         p = Path(self.root, self.split)
         pp = []
-        for id in ids:
-            pp.extend(p.glob(f'fan/{id}/{"normal" if self.normal else "abnormal"}/*.wav'))
+        pp.extend(p.glob(f'valve/id_00/{"normal" if self.normal else "abnormal"}/*.wav'))
         
         for track_path in tqdm.tqdm(pp):
             # print(track_path)
