@@ -138,31 +138,31 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
                 stop_sample = None
 
             # load actual audio
-            audio, _ = sf.read(
+            np_audio, _ = sf.read(
                 Path(self.tracks[track_id]["source_paths"][i]),
                 always_2d=True,
                 start=start_sample,
                 stop=stop_sample,
             )
             # convert to torch tensor
-            audio = torch.tensor(audio.T, dtype=torch.float)[:, :]
+            audio = torch.tensor(np_audio.T, dtype=torch.float)[:, :]
             # apply source-wise augmentations
             audio = self.source_augmentations(audio)
 
             #apply mask
             audio_len = audio.shape[1]
-            mask_len = random.randrange(audio_len//2)
+            mask_len = random.randrange(int(audio_len * 0.8))
             if i == 0:
-                start_point = random.randrange(0, audio_len//2 - mask_len)
+                start_point = 0
             else:
-                start_point = random.randrange(audio_len//2, audio_len//2 - mask_len)
+                start_point = audio_len - mask_len
             torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.01, max=0.01)
             audio_sources[source] = audio  
             #[channel, time]
             
             if self.use_control:
-                rms_fig = librosa.feature.rms(audio) #[1, 313]
-                rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1) 
+                rms_fig = librosa.feature.rms(np_audio) #[1, 313]
+                rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
                 # [channel, time, 1]
                 rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
                 # [channel, time]
@@ -171,7 +171,8 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
                     k = int(audio.shape[1]*0.75)
                     min_threshold, _ = torch.kthvalue(rms_trim, k)
 
-                    label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
+                    label = (rms_trim > min_threshold).type(torch.float) 
+                    # label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
                     label = label.expand(audio.shape[0], -1)
                     active_label_sources[source] = label
                     #[channel, time]

@@ -8,6 +8,8 @@ egs/mimii/X-UMX/x-umx*
 egs/mimii/X-UMX/output*
 egs/mimii_single/X-UMX/output*
 
+egs/**/wandb
+
 .vscode*
 
 # Byte-compiled / optimized / DLL files

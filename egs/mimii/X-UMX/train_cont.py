@@ -377,59 +377,60 @@ class XUMXManager(System):
             sp += dur_samples
 
             ###
-            targets = gt
-            mixture = input
-            spec_hat, time_hat = est_step
+            if self.current_epoch % 10 == 0:
+                targets = gt
+                mixture = input
+                spec_hat, time_hat = est_step
 
-            
-            n_src, n_batch, n_channel, time_length = time_hat.shape
-            assert n_batch == 1
-            time_hat = time_hat.view(n_src, time_length, n_channel)
+                
+                n_src, n_batch, n_channel, time_length = time_hat.shape
+                assert n_batch == 1
+                time_hat = time_hat.view(n_src, time_length, n_channel)
 
-            targets = targets[:, :, :, :time_length]
-            targets = targets.squeeze(0).permute(0, 2, 1)
+                targets = targets[:, :, :, :time_length]
+                targets = targets.squeeze(0).permute(0, 2, 1)
 
-            mixture = mixture[:, :, :time_length]
-            mixture = mixture.permute(0, 2, 1)
-            mix_audio = mixture
-            mixture = mixture.repeat(n_src, 1, 1)
+                mixture = mixture[:, :, :time_length]
+                mixture = mixture.permute(0, 2, 1)
+                mix_audio = mixture
+                mixture = mixture.repeat(n_src, 1, 1)
 
-            sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
-            sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
+                sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
+                sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
 
-            sdr_tmp += np.mean(sdr, axis=1)
-            sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
+                sdr_tmp += np.mean(sdr, axis=1)
+                sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
 
             if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
         loss = loss_tmp / cnt
-        sdr = sdr_tmp / cnt
-        sdri = sdri_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
-        for i, src in enumerate(["id_00", "id_02"]): #["fan", "pump", "slider", "valve"]
-           
-            self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
-            self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
-
+        
+        if self.current_epoch % 10 == 0:
+            sdr = sdr_tmp / cnt
+            sdri = sdri_tmp / cnt
+            for i, src in enumerate(["id_00", "id_02"]): #["fan", "pump", "slider", "valve"]
             
+                self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
+                self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
+                
+            valve1_hat = np.array(time_hat[0, :, :].reshape(-1,1).detach().cpu())
+            valve2_hat = np.array(time_hat[1, :, :].reshape(-1,1).detach().cpu())
 
-        valve1_hat = np.array(time_hat[0, :, :].reshape(-1,1).detach().cpu())
-        valve2_hat = np.array(time_hat[1, :, :].reshape(-1,1).detach().cpu())
+            valve1_gt = np.array(targets[0, :, :].reshape(-1,1).detach().cpu())
+            valve2_gt = np.array(targets[1, :, :].reshape(-1,1).detach().cpu())
 
-        valve1_gt = np.array(targets[0, :, :].reshape(-1,1).detach().cpu())
-        valve2_gt = np.array(targets[1, :, :].reshape(-1,1).detach().cpu())
+            mixture_audio = np.array(mix_audio.reshape(-1,1).detach().cpu())
 
-        mixture_audio = np.array(mix_audio.reshape(-1,1).detach().cpu())
-
-        self.logger.experiment.log({"val_valve1": [wandb.Audio(valve1_hat, sample_rate = 16000)],
-            "gt_valve1": [wandb.Audio(valve1_gt, sample_rate = 16000)],
-            "val_valve2": [wandb.Audio(valve2_hat, sample_rate = 16000)],
-            "gt_valve2": [wandb.Audio(valve2_gt, sample_rate = 16000)],
-            "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
+            self.logger.experiment.log({"val_valve1": [wandb.Audio(valve1_hat, sample_rate = 16000)],
+                "gt_valve1": [wandb.Audio(valve1_gt, sample_rate = 16000)],
+                "val_valve2": [wandb.Audio(valve2_hat, sample_rate = 16000)],
+                "gt_valve2": [wandb.Audio(valve2_gt, sample_rate = 16000)],
+                "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
 
          
-        self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
-        self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
+            self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
+            self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
 
 
 
