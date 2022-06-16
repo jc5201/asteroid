@@ -5,15 +5,8 @@ import librosa
 import numpy as np
 from pathlib import Path
 
-def get_tracks():
-    ids = ["id_00", "id_02", "id_04"]
-    sources = ["valve"]
-    sources_paths = "/dev/shm/mimii/6dB/valve/{id}/normal/*.wav".format(ids)
 
-
-
-path = "/dev/shm/mimii/6dB/valve/id_00/normal/00000100.wav"
-audio, _ = sf.read("/dev/shm/mimii/6dB/valve/id_00/normal/00000200.wav", always_2d=True)
+audio, _ = sf.read("/dev/shm/mimii/6dB/valve/id_00/normal/00000011.wav", always_2d=True)
 audio = torch.tensor(audio)
 
 audio = audio[:, :].permute(1,0)
@@ -27,24 +20,19 @@ result = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
 # [channel, time]
 
 
-k = int(audio.shape[1]*0.75)
+k = int(audio.shape[1]*0.8)
 min_threshold, _ = torch.kthvalue(result, k)
 print(min_threshold)
-label = torch.as_tensor([0 if j < min_threshold else 1 for j in result[0, :]])
-#label = label.expand(audio.shape[0], -1)
+label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in result[0, :]])
 
-# sort_tensor, _ = torch.sort(rms_tensor.reshape(-1))
+plt.plot(rms_fig.reshape(-1))
+plt.savefig("rms.png")
 
-# sort_tensor = sort_tensor[int(rms_tensor.reshape(-1).shape[0]*0.75)]
-# min_threshold  = torch.mean(sort_tensor)
+# plt.plot(label)
+# plt.savefig("label.png")
 
-# label = [0 if i<min_threshold else 1 for i in result]
-
-# plt.plot(rms_fig.reshape(-1))
-# plt.savefig("rms.png")
-
-plt.plot(label)
-plt.savefig("label.png")
+# plt.plot(audio[0, :])
+# plt.savefig("audio.png")
 
 
 

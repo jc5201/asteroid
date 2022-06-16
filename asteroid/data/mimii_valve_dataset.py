@@ -152,7 +152,10 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
             #apply mask
             audio_len = audio.shape[1]
             mask_len = random.randrange(audio_len//2)
-            start_point = random.randrange(0, audio_len - mask_len)
+            if i == 0:
+                start_point = random.randrange(0, audio_len//2 - mask_len)
+            else:
+                start_point = random.randrange(audio_len//2, audio_len//2 - mask_len)
             torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.01, max=0.01)
             audio_sources[source] = audio  
             #[channel, time]
@@ -168,9 +171,10 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
                     k = int(audio.shape[1]*0.75)
                     min_threshold, _ = torch.kthvalue(rms_trim, k)
 
-                    label = torch.as_tensor([0 if j < min_threshold else 1 for j in rms_trim[0, :]])
+                    label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
                     label = label.expand(audio.shape[0], -1)
                     active_label_sources[source] = label
+                    #[channel, time]
 
                 else:
                     label = random.choices([0,1], k=10)
@@ -193,7 +197,6 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
             # [source, channel, time]
             if self.targets:
                 active_labels = active_labels[:, 0:2, :]
-
             return audio_mix, audio_sources, active_labels
 
 

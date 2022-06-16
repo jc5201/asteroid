@@ -35,7 +35,7 @@ import wandb
 # By default train.py will use all available GPUs.
 parser = argparse.ArgumentParser()
 
-os.environ["CUDA_VISIBLE_DEVICES"]= "0"
+os.environ["CUDA_VISIBLE_DEVICES"]= "1"
 
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
@@ -373,6 +373,7 @@ class XUMXManager(System):
                 gt,  # target
                 label,
             ]
+
             loss_step, est_step = self.common_step(batch_tmp, batch_nb, train=False, return_est=True)
             loss_tmp += loss_step
             cnt += 1
@@ -393,6 +394,7 @@ class XUMXManager(System):
 
             mixture = mixture[:, :, :time_length]
             mixture = mixture.permute(0, 2, 1)
+            mix_audio = mixture
             mixture = mixture.repeat(n_src, 1, 1)
 
             sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
@@ -407,25 +409,28 @@ class XUMXManager(System):
         sdr = sdr_tmp / cnt
         sdri = sdri_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
-        for i, src in enumerate(["fan", "pump", "slider", "valve"]):
-            audio = np.array(time_hat[i, :, :].reshape(-1,1).detach().cpu())
-            gt_audio = np.array(targets[i, :, :].reshape(-1,1).detach().cpu())
-            mixture_audio = np.array(mixture.reshape(-1,1).detach().cpu())
-
-            waveform_hat = torch.mean(time_hat[i, :, :].detach().cpu(), dim =  1).unsqueeze(1)
-            waveform_gt = torch.mean(targets[i, :, :].detach().cpu(), dim =1).unsqueeze(1)
-
+        for i, src in enumerate(["id_00", "id_02"]): #["fan", "pump", "slider", "valve"]
+           
             self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
             self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
 
-            self.logger.experiment.log({f"val_audio_{src}": [wandb.Audio(audio, sample_rate = 16000)]})
-            self.logger.experiment.log({f"gt_audio_{src}": [wandb.Audio(gt_audio, sample_rate = 16000)]})
-            self.logger.experiment.log({"mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
             
-            self.log(f"val_wav_{src}", waveform_hat, on_epoch=True, prog_bar=True)
-            self.log(f"gt_wav_{src}", waveform_gt, on_epoch=True, prog_bar=True)
-            self.log(f"diff_{src}", waveform_gt - waveform_hat, on_epoch=True, prog_bar=True)
 
+        valve1_hat = np.array(time_hat[0, :, :].reshape(-1,1).detach().cpu())
+        valve2_hat = np.array(time_hat[1, :, :].reshape(-1,1).detach().cpu())
+
+        valve1_gt = np.array(targets[0, :, :].reshape(-1,1).detach().cpu())
+        valve2_gt = np.array(targets[1, :, :].reshape(-1,1).detach().cpu())
+
+        mixture_audio = np.array(mix_audio.reshape(-1,1).detach().cpu())
+
+        self.logger.experiment.log({"val_valve1": [wandb.Audio(valve1_hat, sample_rate = 16000)],
+            "gt_valve1": [wandb.Audio(valve1_gt, sample_rate = 16000)],
+            "val_valve2": [wandb.Audio(valve2_hat, sample_rate = 16000)],
+            "gt_valve2": [wandb.Audio(valve2_gt, sample_rate = 16000)],
+            "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
+
+         
         self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
         self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
 

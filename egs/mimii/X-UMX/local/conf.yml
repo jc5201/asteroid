@@ -18,7 +18,7 @@ optim:
 data:
   train_dir: /hdd/hdd1/mimii
   split: 6dB
-  output: x-umx_outputs
+  output: valve/with_cont/test2
   sample_rate: 16000
   num_workers: 4
   seed: 42
@@ -30,7 +30,6 @@ data:
   sources:
     - id_00
     - id_02
-
   use_control: True
 # Network config
 model:

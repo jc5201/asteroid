@@ -405,28 +405,21 @@ class XUMXManager(System):
         sdr = sdr_tmp / cnt
         sdri = sdri_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
-        for i, src in enumerate(["fan", "pump", "slider", "valve"]):
+
+        for i, src in enumerate(["fan", "pump", "slider", "valve"]): # ["id_00", "id_02"]
             audio = np.array(time_hat[i, :, :].reshape(-1,1).detach().cpu())
             gt_audio = np.array(targets[i, :, :].reshape(-1,1).detach().cpu())
             mixture_audio = np.array(mixture.reshape(-1,1).detach().cpu())
 
-            waveform_hat = torch.mean(time_hat[i, :, :].detach().cpu(), dim =  1).unsqueeze(1)
-            waveform_gt = torch.mean(targets[i, :, :].detach().cpu(), dim =1).unsqueeze(1)
-
-            self.logger.experiment.log({f"val_audio_{src}": [wandb.Audio(audio, sample_rate = 16000)]})
-            self.logger.experiment.log({f"gt_audio_{src}": [wandb.Audio(gt_audio, sample_rate = 16000)]})
-            self.logger.experiment.log({"mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
-            
-            self.log(f"val_wav_{src}", waveform_hat, on_epoch=True, prog_bar=True)
-            self.log(f"gt_wav_{src}", waveform_gt, on_epoch=True, prog_bar=True)
-            self.log(f"diff_{src}", waveform_gt - waveform_hat, on_epoch=True, prog_bar=True)
-
             self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
             self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
-           
+
+            self.logger.experiment.log({f"val_audio_{src}": [wandb.Audio(audio, sample_rate = 16000)],
+            f"gt_audio_{src}": [wandb.Audio(gt_audio, sample_rate = 16000)],
+            "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
+            
         self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
         self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
-
 
 
 def main(conf, args):
@@ -532,7 +525,6 @@ def main(conf, args):
         distributed_backend=distributed_backend,
         limit_train_batches=1.0,  # Useful for fast experiment
         logger = wandb_logger,
-        check_val_every_n_epoch=100,
     )
     trainer.fit(system)
 
