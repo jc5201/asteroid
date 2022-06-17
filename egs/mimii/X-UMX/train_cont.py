@@ -414,6 +414,7 @@ class XUMXManager(System):
                 self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
                 self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
                 
+            if batch_nb % 8 == 0:
             valve1_hat = np.array(time_hat[0, :, :].reshape(-1,1).detach().cpu())
             valve2_hat = np.array(time_hat[1, :, :].reshape(-1,1).detach().cpu())
 
@@ -525,8 +526,9 @@ def main(conf, args):
     callbacks.append(checkpoint)
     callbacks.append(es)
 
+    run_name = os.path.basename(os.path.normpath(exp_dir))
     # Don't ask GPU if they are not available.
-    wandb_logger = WandbLogger()
+    wandb_logger = WandbLogger(name=run_name)
     gpus = -1 if torch.cuda.is_available() else None
     distributed_backend = "ddp" if torch.cuda.is_available() else None
     trainer = pl.Trainer(
