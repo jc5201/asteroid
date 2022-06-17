@@ -384,7 +384,7 @@ class XUMXManager(System):
                 
                 n_src, n_batch, n_channel, time_length = time_hat.shape
                 assert n_batch == 1
-                time_hat = time_hat.view(n_src, time_length, n_channel)
+                time_hat = time_hat.squeeze(1).permute(0, 2, 1)
 
                 targets = targets[:, :, :, :time_length]
                 targets = targets.squeeze(0).permute(0, 2, 1)
@@ -403,7 +403,7 @@ class XUMXManager(System):
                 break
         loss = loss_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
-        
+
         if self.current_epoch % 10 == 0:
             sdr = sdr_tmp / cnt
             sdri = sdri_tmp / cnt

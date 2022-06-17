@@ -91,7 +91,7 @@ class Compose(object):
 
 def _augment_delay(audio, max=16000):
     """Applies a random gain to each source between `low` and `high`"""
-    delay = np.random.randint(max)
+    delay = random.randint(0, max)
     audio_len = audio.shape[1]
     delayed = torch.cat([torch.zeros_like(audio)[:, :delay], audio[:, :audio_len - delay]], dim=1)
     return delayed

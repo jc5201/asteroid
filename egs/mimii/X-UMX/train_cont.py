@@ -385,7 +385,7 @@ class XUMXManager(System):
                 
                 n_src, n_batch, n_channel, time_length = time_hat.shape
                 assert n_batch == 1
-                time_hat = time_hat.view(n_src, time_length, n_channel)
+                time_hat = time_hat.squeeze(1).permute(0, 2, 1)
 
                 targets = targets[:, :, :, :time_length]
                 targets = targets.squeeze(0).permute(0, 2, 1)
@@ -415,15 +415,16 @@ class XUMXManager(System):
                 self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
                 
             if batch_nb % 8 == 0:
-            valve1_hat = np.array(time_hat[0, :, :].reshape(-1,1).detach().cpu())
-            valve2_hat = np.array(time_hat[1, :, :].reshape(-1,1).detach().cpu())
+                valve1_hat = np.array(time_hat[0, :, 0].reshape(-1,1).detach().cpu())
+                valve2_hat = np.array(time_hat[1, :, 0].reshape(-1,1).detach().cpu())
 
-            valve1_gt = np.array(targets[0, :, :].reshape(-1,1).detach().cpu())
-            valve2_gt = np.array(targets[1, :, :].reshape(-1,1).detach().cpu())
+                valve1_gt = np.array(targets[0, :, 0].reshape(-1,1).detach().cpu())
+                valve2_gt = np.array(targets[1, :, 0].reshape(-1,1).detach().cpu())
 
-            mixture_audio = np.array(mix_audio.reshape(-1,1).detach().cpu())
+                mixture_audio = np.array(mix_audio[0, :, 0].reshape(-1,1).detach().cpu())
 
-            self.logger.experiment.log({"val_valve1": [wandb.Audio(valve1_hat, sample_rate = 16000)],
+                self.logger.experiment.log({
+                    "val_valve1": [wandb.Audio(valve1_hat, sample_rate = 16000)],
                 "gt_valve1": [wandb.Audio(valve1_gt, sample_rate = 16000)],
                 "val_valve2": [wandb.Audio(valve2_hat, sample_rate = 16000)],
                 "gt_valve2": [wandb.Audio(valve2_gt, sample_rate = 16000)],
