@@ -4,7 +4,6 @@ import json
 import random
 import copy
 import tqdm
-import itertools
 import numpy as np
 import sklearn.preprocessing
 import museval
@@ -17,13 +16,10 @@ from asteroid.engine.system import System
 from asteroid.engine.optimizers import make_optimizer
 from asteroid.models import XUMXControl, XUMX
 from asteroid.models.x_umx import _STFT, _Spectrogram
-from asteroid.losses import singlesrc_mse
-from torch.nn.modules.loss import _Loss
-from torch import nn
 
 from local import dataloader
 from pathlib import Path
-from operator import itemgetter
+from loss import MultiDomainLoss
 
 from pytorch_lightning.loggers import WandbLogger
 import wandb 
@@ -34,9 +30,6 @@ import wandb
 
 # By default train.py will use all available GPUs.
 parser = argparse.ArgumentParser()
-
-os.environ["CUDA_VISIBLE_DEVICES"]= "1"
-
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
 
@@ -66,235 +59,6 @@ def get_statistics(args, dataset):
     # set inital input scaler values
     std = np.maximum(scaler.scale_, 1e-4 * np.max(scaler.scale_))
     return scaler.mean_, std
-
-
-def freq_domain_loss(s_hat, gt_spec, combination=True):
-    """Calculate frequency-domain loss between estimated and reference spectrograms.
-    MSE between target and estimated target spectrograms is adopted as frequency-domain loss.
-    If you set ``loss_combine_sources: yes'' in conf.yml, computes loss for all possible
-    combinations of 1, ..., nb_sources-1 instruments.
-
-    Input:
-        estimated spectrograms
-            (Sources, Freq. bins, Batch size, Channels, Frames)
-        reference spectrograms
-            (Freq. bins, Batch size, Sources x Channels, Frames)
-        whether use combination or not (optional)
-    Output:
-        calculated frequency-domain loss
-    """
-
-    n_src = len(s_hat)
-    idx_list = [i for i in range(n_src)]
-
-    inferences = []
-    refrences = []
-    for i, s in enumerate(s_hat):
-        inferences.append(s)
-        refrences.append(gt_spec[..., 2 * i : 2 * i + 2, :])
-    assert inferences[0].shape == refrences[0].shape
-
-    _loss_mse = 0.0
-    cnt = 0.0
-    for i in range(n_src):
-        _loss_mse += singlesrc_mse(inferences[i], refrences[i]).mean()
-        cnt += 1.0
-
-    # If Combination is True, calculate the expected combinations.
-    if combination:
-        for c in range(2, n_src):
-            patterns = list(itertools.combinations(idx_list, c))
-            for indices in patterns:
-                tmp_loss = singlesrc_mse(
-                    sum(itemgetter(*indices)(inferences)),
-                    sum(itemgetter(*indices)(refrences)),
-                ).mean()
-                _loss_mse += tmp_loss
-                cnt += 1.0
-
-    _loss_mse /= cnt
-
-    return _loss_mse
-
-
-def time_domain_loss(mix, time_hat, gt_time, combination=True):
-    """Calculate weighted time-domain loss between estimated and reference time signals.
-    weighted SDR [1] between target and estimated target signals is adopted as time-domain loss.
-    If you set ``loss_combine_sources: yes'' in conf.yml, computes loss for all possible
-    combinations of 1, ..., nb_sources-1 instruments.
-
-    Input:
-        mixture time signal
-            (Batch size, Channels, Time Length (samples))
-        estimated time signals
-            (Sources, Batch size, Channels, Time Length (samples))
-        reference time signals
-            (Batch size, Sources x Channels, Time Length (samples))
-        whether use combination or not (optional)
-    Output:
-        calculated time-domain loss
-
-    References
-        - [1] : "Phase-aware Speech Enhancement with Deep Complex U-Net",
-          Hyeong-Seok Choi et al. https://arxiv.org/abs/1903.03107
-    """
-
-    n_src, n_batch, n_channel, time_length = time_hat.shape
-    idx_list = [i for i in range(n_src)]
-
-    # Fix Length
-    mix = mix[Ellipsis, :time_length]
-    gt_time = gt_time[Ellipsis, :time_length]
-
-    # Prepare Data and Fix Shape
-    mix_ref = [mix]
-    mix_ref.extend([gt_time[..., 2 * i : 2 * i + 2, :] for i in range(n_src)])
-    mix_ref = torch.stack(mix_ref)
-    mix_ref = mix_ref.view(-1, time_length)
-    time_hat = time_hat.view(n_batch * n_channel * time_hat.shape[0], time_hat.shape[-1])
-
-    # If Combination is True, calculate the expected combinations.
-    if combination:
-        indices = []
-        for c in range(2, n_src):
-            indices.extend(list(itertools.combinations(idx_list, c)))
-
-        for tr in indices:
-            sp = [n_batch * n_channel * (tr[i] + 1) for i in range(len(tr))]
-            ep = [n_batch * n_channel * (tr[i] + 2) for i in range(len(tr))]
-            spi = [n_batch * n_channel * tr[i] for i in range(len(tr))]
-            epi = [n_batch * n_channel * (tr[i] + 1) for i in range(len(tr))]
-
-            tmp = sum([mix_ref[sp[i] : ep[i], ...].clone() for i in range(len(tr))])
-            tmpi = sum([time_hat[spi[i] : epi[i], ...].clone() for i in range(len(tr))])
-            mix_ref = torch.cat([mix_ref, tmp], dim=0)
-            time_hat = torch.cat([time_hat, tmpi], dim=0)
-
-        mix_t = mix_ref[: n_batch * n_channel, Ellipsis].repeat(n_src + len(indices), 1)
-        refrences_t = mix_ref[n_batch * n_channel :, Ellipsis]
-    else:
-        mix_t = mix_ref[: n_batch * n_channel, Ellipsis].repeat(n_src, 1)
-        refrences_t = mix_ref[n_batch * n_channel :, Ellipsis]
-
-    # Calculation
-    _loss_sdr = weighted_sdr(time_hat, refrences_t, mix_t)
-
-    return 1.0 + _loss_sdr
-
-
-def weighted_sdr(input, gt, mix, weighted=True, eps=1e-10):
-    # ``input'', ``gt'' and ``mix'' should be (Batch, Time Length)
-    assert input.shape == gt.shape
-    assert mix.shape == gt.shape
-
-    ns = mix - gt
-    ns_hat = mix - input
-
-    if weighted:
-        alpha_num = (gt * gt).sum(1, keepdims=True)
-        alpha_denom = (gt * gt).sum(1, keepdims=True) + (ns * ns).sum(1, keepdims=True)
-        alpha = alpha_num / (alpha_denom + eps)
-    else:
-        alpha = 0.5
-
-    # Target
-    num_cln = (input * gt).sum(1, keepdims=True)
-    denom_cln = torch.sqrt(eps + (input * input).sum(1, keepdims=True)) * torch.sqrt(
-        eps + (gt * gt).sum(1, keepdims=True)
-    )
-    sdr_cln = num_cln / (denom_cln + eps)
-
-    # Noise
-    num_noise = (ns * ns_hat).sum(1, keepdims=True)
-    denom_noise = torch.sqrt(eps + (ns_hat * ns_hat).sum(1, keepdims=True)) * torch.sqrt(
-        eps + (ns * ns).sum(1, keepdims=True)
-    )
-    sdr_noise = num_noise / (denom_noise + eps)
-
-    return torch.mean(-alpha * sdr_cln - (1.0 - alpha) * sdr_noise)
-
-
-class MultiDomainLoss(_Loss):
-    """A class for calculating loss functions of X-UMX.
-
-    Args:
-        window_length (int): The length in samples of window function to use in STFT.
-        in_chan (int): Number of input channels, should be equal to
-            STFT size and STFT window length in samples.
-        n_hop (int): STFT hop length in samples.
-        spec_power (int): Exponent for spectrogram calculation.
-        nb_channels (int): set number of channels for model (1 for mono
-            (spectral downmix is applied,) 2 for stereo).
-        loss_combine_sources (bool): Set to true if you are using the combination scheme
-            proposed in [1]. If you select ``loss_combine_sources: yes'' via
-            conf.yml, this is set as True.
-        loss_use_multidomain (bool): Set to true if you are using a frequency- and time-domain
-            losses collaboratively, i.e., Multi Domain Loss (MDL) proposed in [1].
-            If you select ``loss_use_multidomain: yes'' via conf.yml, this is set as True.
-        mix_coef (float): A mixing parameter for multi domain losses
-
-    References
-        [1] "All for One and One for All: Improving Music Separation by Bridging
-        Networks", Ryosuke Sawata, Stefan Uhlich, Shusuke Takahashi and Yuki Mitsufuji.
-        https://arxiv.org/abs/2010.04228 (and ICASSP 2021)
-    """
-
-    def __init__(
-        self,
-        window_length,
-        in_chan,
-        n_hop,
-        spec_power,
-        nb_channels,
-        loss_combine_sources,
-        loss_use_multidomain,
-        mix_coef,
-    ):
-        super().__init__()
-        self.transform = nn.Sequential(
-            _STFT(window_length=window_length, n_fft=in_chan, n_hop=n_hop),
-            _Spectrogram(spec_power=spec_power, mono=(nb_channels == 1)),
-        )
-        self._combi = loss_combine_sources
-        self._multi = loss_use_multidomain
-        self.coef = mix_coef
-        print("Combination Loss: {}".format(self._combi))
-        if self._multi:
-            print(
-                "Multi Domain Loss: {}, scaling parameter for time-domain loss={}".format(
-                    self._multi, self.coef
-                )
-            )
-        else:
-            print("Multi Domain Loss: {}".format(self._multi))
-        self.cnt = 0
-
-    def forward(self, est_targets, targets, return_est=False, **kwargs):
-        """est_targets (list) has 2 elements:
-            [0]->Estimated Spec. : (Sources, Frames, Batch size, Channels, Freq. bins)
-            [1]->Estimated Signal: (Sources, Batch size, Channels, Time Length)
-
-        targets: (Batch, Source, Channels, TimeLen)
-        """
-
-        spec_hat = est_targets[0]
-        time_hat = est_targets[1]
-
-        # Fix shape and apply transformation of targets
-        n_batch, n_src, n_channel, time_length = targets.shape
-        targets = targets.view(n_batch, n_src * n_channel, time_length)
-        Y = self.transform(targets)[0]
-
-        if self._multi:
-            n_src = spec_hat.shape[0]
-            mixture_t = sum([targets[:, 2 * i : 2 * i + 2, ...] for i in range(n_src)])
-            loss_f = freq_domain_loss(spec_hat, Y, combination=self._combi)
-            loss_t = time_domain_loss(mixture_t, time_hat, targets, combination=self._combi)
-            loss = float(self.coef) * loss_t + loss_f
-        else:
-            loss = freq_domain_loss(spec_hat, Y, combination=self._combi)
-
-        return loss
 
 
 class XUMXManager(System):
@@ -380,34 +144,41 @@ class XUMXManager(System):
             sp += dur_samples
 
             ###
-            targets = gt
-            mixture = input
-            spec_hat, time_hat = est_step
+            if self.current_epoch % 10 == 0:
+                targets = gt
+                mixture = input
+                spec_hat, time_hat = est_step
 
-            
-            n_src, n_batch, n_channel, time_length = time_hat.shape
-            assert n_batch == 1
-            time_hat = time_hat.view(n_src, time_length, n_channel)
+                
+                n_src, n_batch, n_channel, time_length = time_hat.shape
+                assert n_batch == 1
+                time_hat = time_hat.squeeze(1).permute(0, 2, 1)
 
-            targets = targets[:, :, :, :time_length]
-            targets = targets.squeeze(0).permute(0, 2, 1)
+                targets = targets[:, :, :, :time_length]
+                targets = targets.squeeze(0).permute(0, 2, 1)
 
+<<<<<<< HEAD
             mixture = mixture[:, :, :time_length]
             mixture = mixture.permute(0, 2, 1)
             mixture = mixture.repeat(n_src, 1, 1)
+=======
+                mixture = mixture[:, :, :time_length]
+                mixture = mixture.permute(0, 2, 1)
+                mix_audio = mixture.clone()
+                mixture = mixture.repeat(n_src, 1, 1)
+>>>>>>> origin/kjc-xumx-control
 
-            sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
-            sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
+                sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
+                sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
 
-            sdr_tmp += np.mean(sdr, axis=1)
-            sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
+                sdr_tmp += np.mean(sdr, axis=1)
+                sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
 
             if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
         loss = loss_tmp / cnt
-        sdr = sdr_tmp / cnt
-        sdri = sdri_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
+<<<<<<< HEAD
         for i, src in enumerate(["id_00", "id_02"]): #["fan", "pump", "slider", "valve"]
             self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
             self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
@@ -424,6 +195,36 @@ class XUMXManager(System):
 
         self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
         self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
+=======
+        
+        if self.current_epoch % 10 == 0:
+            sdr = sdr_tmp / cnt
+            sdri = sdri_tmp / cnt
+            for i, src in enumerate(self.model.sources): 
+            
+                self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
+                self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
+                
+            if batch_nb % 8 == 0:
+                valve1_hat = np.array(time_hat[0, :, 0].reshape(-1,1).detach().cpu())
+                valve2_hat = np.array(time_hat[1, :, 0].reshape(-1,1).detach().cpu())
+
+                valve1_gt = np.array(targets[0, :, 0].reshape(-1,1).detach().cpu())
+                valve2_gt = np.array(targets[1, :, 0].reshape(-1,1).detach().cpu())
+
+                mixture_audio = np.array(mix_audio[0, :, 0].reshape(-1,1).detach().cpu())
+
+                self.logger.experiment.log({
+                    "val_valve1": [wandb.Audio(valve1_hat, sample_rate = 16000)],
+                "gt_valve1": [wandb.Audio(valve1_gt, sample_rate = 16000)],
+                "val_valve2": [wandb.Audio(valve2_hat, sample_rate = 16000)],
+                "gt_valve2": [wandb.Audio(valve2_gt, sample_rate = 16000)],
+                "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
+
+         
+            self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
+            self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
+>>>>>>> origin/kjc-xumx-control
 
 
 
@@ -519,7 +320,10 @@ def main(conf, args):
     callbacks.append(es)
 
     # Don't ask GPU if they are not available.
-    wandb_logger = WandbLogger()
+    
+    run_name = os.path.basename(os.path.normpath(exp_dir))
+    wandb.init(save_code=True, config=args, name=run_name)
+    wandb_logger = WandbLogger(name=run_name)
     gpus = -1 if torch.cuda.is_available() else None
     distributed_backend = "ddp" if torch.cuda.is_available() else None
     trainer = pl.Trainer(

@@ -18,7 +18,7 @@ optim:
 data:
   train_dir: /hdd/hdd1/mimii
   split: 6dB
-  output: valve/with_cont/test3
+  output: x-umx_outputs
   sample_rate: 16000
   num_workers: 4
   seed: 42
@@ -26,7 +26,7 @@ data:
   samples_per_track: 2
   source_augmentations:
     - gain
-    - channelswap
+    - delay
   sources:
     - id_00
     - id_02 

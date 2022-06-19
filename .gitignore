@@ -6,7 +6,11 @@ pretrained_models
 
 egs/mimii/X-UMX/x-umx*
 egs/mimii/X-UMX/output*
+egs/mimii/X-UMX/mimii*
+egs/mimii/X-UMX/valve*
 egs/mimii_single/X-UMX/output*
+
+egs/**/wandb
 
 .vscode*
 

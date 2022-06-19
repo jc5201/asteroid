@@ -1,6 +1,8 @@
 from asteroid.data import MIMIIDataset, MIMIIValveDataset
 import torch
 from pathlib import Path
+import numpy as np
+import random
 
 train_tracks = [f"{n:0>8}" for n in range(10, 410)]
 
@@ -41,6 +43,7 @@ def load_datasets(parser, args):
         sample_rate=args.sample_rate,
         samples_per_track=args.samples_per_track,
         use_control=args.use_control,
+        task_random= args.task_random
         **dataset_kwargs,
     )
     train_dataset = filtering_out_valid(train_dataset)
@@ -52,6 +55,7 @@ def load_datasets(parser, args):
         targets=args.sources,
         segment=args.val_dur,
         use_control=args.use_control,
+        task_random= args.task_random
         **dataset_kwargs,
     )
 
@@ -86,6 +90,14 @@ class Compose(object):
         for transform in self.transforms:
             audio = transform(audio)
         return audio
+
+
+def _augment_delay(audio, max=16000):
+    """Applies a random gain to each source between `low` and `high`"""
+    delay = random.randint(0, max)
+    audio_len = audio.shape[1]
+    delayed = torch.cat([torch.zeros_like(audio)[:, :delay], audio[:, :audio_len - delay]], dim=1)
+    return delayed
 
 
 def _augment_gain(audio, low=0.25, high=1.25):
