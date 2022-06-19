@@ -394,7 +394,6 @@ class XUMXManager(System):
 
             mixture = mixture[:, :, :time_length]
             mixture = mixture.permute(0, 2, 1)
-            mix_audio = mixture
             mixture = mixture.repeat(n_src, 1, 1)
 
             sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
@@ -410,27 +409,19 @@ class XUMXManager(System):
         sdri = sdri_tmp / cnt
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
         for i, src in enumerate(["id_00", "id_02"]): #["fan", "pump", "slider", "valve"]
-           
             self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
             self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
 
-            
+            globals()['valve{}_hat'.format(i)] = np.array(time_hat[i, :, :].reshape(-1,1).detach().cpu())
+            globals()['valve{}_gt'.format(i)] = np.array(targets[i, :, :].reshape(-1,1).detach().cpu())
 
-        valve1_hat = np.array(time_hat[0, :, :].reshape(-1,1).detach().cpu())
-        valve2_hat = np.array(time_hat[1, :, :].reshape(-1,1).detach().cpu())
-
-        valve1_gt = np.array(targets[0, :, :].reshape(-1,1).detach().cpu())
-        valve2_gt = np.array(targets[1, :, :].reshape(-1,1).detach().cpu())
-
-        mixture_audio = np.array(mix_audio.reshape(-1,1).detach().cpu())
-
+        mixture_audio = np.array(mixture[0, :, :].reshape(-1,1).detach().cpu())
         self.logger.experiment.log({"val_valve1": [wandb.Audio(valve1_hat, sample_rate = 16000)],
             "gt_valve1": [wandb.Audio(valve1_gt, sample_rate = 16000)],
             "val_valve2": [wandb.Audio(valve2_hat, sample_rate = 16000)],
             "gt_valve2": [wandb.Audio(valve2_gt, sample_rate = 16000)],
             "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
 
-         
         self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
         self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
 

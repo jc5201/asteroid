@@ -105,7 +105,7 @@ class XUMXControl(BaseModel):
         for src in sources:
             # Define Enc.
             src_enc[src] = _InstrumentBackboneEnc(
-                nb_bins=self.max_bin + 1,
+                nb_bins=self.max_bin ,
                 hidden_size=hidden_size,
                 nb_channels=nb_channels,
             )
@@ -193,6 +193,8 @@ class XUMXControl(BaseModel):
 
         # crop
         x = input_spec[..., : self.max_bin]
+        controls_spec = controls_spec.expand(-1, -1, -1, -1, x.shape[-1])
+        # controls : [src, Tb, B, ch, 2049]
 
         # clone for the number of sources
         inputs = [x]
@@ -207,8 +209,7 @@ class XUMXControl(BaseModel):
 
             ### concat controls
             # TODO 
-            inputs[i] = torch.cat([inputs[i], controls_spec[i]], dim=3)
-
+            inputs[i] = torch.cat([inputs[i], controls_spec[i]], dim=2)
             inputs[i] = self.layer_enc[src](inputs[i], shapes)
 
         # 1st Bridging operation and apply 3-layers of stacked LSTM
