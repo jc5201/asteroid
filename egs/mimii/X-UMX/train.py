@@ -32,6 +32,9 @@ import wandb
 parser = argparse.ArgumentParser()
 
 
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
+os.environ["CUDA_VISIBLE_DEVICES"]= "1" 
+
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
 
@@ -177,9 +180,9 @@ class XUMXManager(System):
             sdri = sdri_tmp / cnt
 
             for i, src in enumerate(self.model.sources): # ["id_00", "id_02"]
-                audio = np.array(time_hat[i, :, :].reshape(-1,1).detach().cpu())
-                gt_audio = np.array(targets[i, :, :].reshape(-1,1).detach().cpu())
-                mixture_audio = np.array(mixture.reshape(-1,1).detach().cpu())
+                audio = np.array(time_hat[i, :, 0].reshape(-1,1).detach().cpu())
+                gt_audio = np.array(targets[i, :, 0].reshape(-1,1).detach().cpu())
+                mixture_audio = np.array(mixture[0, :, 0].reshape(-1,1).detach().cpu())
 
                 self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
                 self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)

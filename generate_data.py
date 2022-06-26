@@ -6,7 +6,7 @@ import numpy as np
 from pathlib import Path
 
 
-audio, _ = sf.read("/dev/shm/mimii/6dB/valve/id_00/normal/00000011.wav", always_2d=True)
+audio, _ = sf.read("/dev/shm/mimii/6dB/slider/id_00/normal/00000011.wav", always_2d=True)
 audio = torch.tensor(audio)
 
 audio = audio[:, :].permute(1,0)

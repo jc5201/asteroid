@@ -105,9 +105,9 @@ class XUMXControl(BaseModel):
         for src in sources:
             # Define Enc.
             src_enc[src] = _InstrumentBackboneEnc(
-                nb_bins=self.max_bin ,
+                nb_bins=self.max_bin  , ##TODO: +1 지웠음
                 hidden_size=hidden_size,
-                nb_channels=nb_channels,
+                nb_channels=nb_channels*2,
             )
 
             # Define Recurrent Lyaers.
@@ -193,7 +193,7 @@ class XUMXControl(BaseModel):
 
         # crop
         x = input_spec[..., : self.max_bin]
-        #controls_spec = controls_spec.expand(-1, -1, -1, -1, x.shape[-1])
+        controls_spec = controls_spec.expand(-1, -1, -1, -1, x.shape[-1]) ## TODO
         # controls : [src, Tb, B, ch, 2049]
 
         # clone for the number of sources
@@ -209,20 +209,22 @@ class XUMXControl(BaseModel):
 
             ### concat controls
             # TODO 
-            inputs[i] = torch.cat([inputs[i], controls_spec[i]], dim=3)  ##TODO fix concat dimension
+            inputs[i] = torch.cat([inputs[i], controls_spec[i]], dim=2)  ##TODO fix concat dimension
             inputs[i] = self.layer_enc[src](inputs[i], shapes)
 
         # 1st Bridging operation and apply 3-layers of stacked LSTM
         cross_1 = sum(inputs) / len(self.sources)
+        #[Tb, B, hidden]
         cross_2 = 0.0
         for i, src in enumerate(self.sources):
             tmp_lstm_out = self.layer_lstm[src](cross_1)
             # lstm skip connection
             cross_2 += torch.cat([inputs[i], tmp_lstm_out[0]], -1)
+            #[Tb, B, hidden*2]
 
         # 2nd Bridging operation
         cross_2 /= len(self.sources)
-        #[Tb, B, 1024]
+        #[Tb, B, hidden*2]
         mask_list = []
         for i, src in enumerate(self.sources):
             # TODO
@@ -299,7 +301,7 @@ class _InstrumentBackboneEnc(nn.Module):
 
     def forward(self, x, shapes):
         nb_frames, nb_samples, nb_channels, _ = shapes
-        x = self.enc(x.reshape(-1, nb_channels * self.max_bin))
+        x = self.enc(x.reshape(-1, nb_channels* 2 * self.max_bin))
         x = x.reshape(nb_frames, nb_samples, self.hidden_size)
 
         # squash range to [-1, 1]
@@ -327,7 +329,7 @@ class _InstrumentBackboneDec(nn.Module):
         super().__init__()
         self.nb_output_bins = nb_output_bins
         self.dec = nn.Sequential(
-            Linear(in_features=hidden_size * 2 + 1, out_features=hidden_size, bias=False),
+            Linear(in_features=hidden_size * 2 + self.nb_output_bins, out_features=hidden_size, bias=False),
             BatchNorm1d(hidden_size),
             nn.ReLU(),
             Linear(

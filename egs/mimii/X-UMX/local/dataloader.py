@@ -30,10 +30,9 @@ def load_datasets(parser, args):
     source_augmentations = Compose(
         [globals()["_augment_" + aug] for aug in args.source_augmentations]
     )
-
+    
     train_dataset = MIMIIValveDataset(
         split=args.split,
-        subset=train_tracks,
         sources=args.sources,
         targets=args.sources,
         source_augmentations=source_augmentations,
@@ -43,7 +42,7 @@ def load_datasets(parser, args):
         sample_rate=args.sample_rate,
         samples_per_track=args.samples_per_track,
         use_control=args.use_control,
-        task_random= args.task_random
+        task_random= args.task_random,
         **dataset_kwargs,
     )
     train_dataset = filtering_out_valid(train_dataset)
@@ -55,7 +54,7 @@ def load_datasets(parser, args):
         targets=args.sources,
         segment=args.val_dur,
         use_control=args.use_control,
-        task_random= args.task_random
+        task_random= args.task_random,
         **dataset_kwargs,
     )
 
