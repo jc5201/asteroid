@@ -29,6 +29,9 @@ import wandb
 # found at dic['main_args'][key]
 
 # By default train.py will use all available GPUs.
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
+os.environ["CUDA_VISIBLE_DEVICES"]= "3"
+
 parser = argparse.ArgumentParser()
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
@@ -238,7 +241,7 @@ def main(conf, args):
         hidden_size=args.hidden_size,
         in_chan=args.in_chan,
         n_hop=args.nhop,
-        sources=args.sources,
+        sources=['s1', 's2'],  #sources=args.sources,
         max_bin=max_bin,
         bidirectional=args.bidirectional,
         sample_rate=train_dataset.sample_rate,
@@ -312,17 +315,17 @@ def main(conf, args):
     )
     trainer.fit(system)
 
-    best_k = {k: v.item() for k, v in checkpoint.best_k_models.items()}
-    with open(os.path.join(exp_dir, "best_k_models.json"), "w") as f:
-        json.dump(best_k, f, indent=0)
+    # best_k = {k: v.item() for k, v in checkpoint.best_k_models.items()}
+    # with open(os.path.join(exp_dir, "best_k_models.json"), "w") as f:
+    #     json.dump(best_k, f, indent=0)
 
-    state_dict = torch.load(checkpoint.best_model_path)
-    system.load_state_dict(state_dict=state_dict["state_dict"])
-    system.cpu()
+    # state_dict = torch.load(checkpoint.best_model_path)
+    # system.load_state_dict(state_dict=state_dict["state_dict"])
+    # system.cpu()
 
-    to_save = system.model.serialize()
-    to_save.update(train_dataset.get_infos())
-    torch.save(to_save, os.path.join(exp_dir, "best_model.pth"))
+    # to_save = system.model.serialize()
+    # to_save.update(train_dataset.get_infos())
+    # torch.save(to_save, os.path.join(exp_dir, "best_model.pth"))
 
 
 if __name__ == "__main__":

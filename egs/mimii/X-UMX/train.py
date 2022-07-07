@@ -33,7 +33,7 @@ parser = argparse.ArgumentParser()
 
 
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
-os.environ["CUDA_VISIBLE_DEVICES"]= "1" 
+os.environ["CUDA_VISIBLE_DEVICES"]= "2" 
 
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
@@ -232,7 +232,7 @@ def main(conf, args):
         hidden_size=args.hidden_size,
         in_chan=args.in_chan,
         n_hop=args.nhop,
-        sources=args.sources,
+        sources=['s1', 's2'], #sources=args.sources,
         max_bin=max_bin,
         bidirectional=args.bidirectional,
         sample_rate=train_dataset.sample_rate,
@@ -282,7 +282,7 @@ def main(conf, args):
     callbacks = []
     checkpoint_dir = os.path.join(exp_dir, "checkpoints/")
     checkpoint = ModelCheckpoint(
-        checkpoint_dir, monitor="val_loss", mode="min", save_top_k=5, verbose=True
+        checkpoint_dir, monitor="val_loss", mode="min", verbose=True, save_top_k=1000,
     )
     callbacks.append(checkpoint)
     callbacks.append(es)

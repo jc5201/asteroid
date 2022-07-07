@@ -1,4 +1,4 @@
-from asteroid.data import MIMIIDataset, MIMIIValveDataset
+from asteroid.data import MIMIIDataset, MIMIIValveDataset, MIMIISliderDataset
 import torch
 from pathlib import Path
 import numpy as np
@@ -30,8 +30,8 @@ def load_datasets(parser, args):
     source_augmentations = Compose(
         [globals()["_augment_" + aug] for aug in args.source_augmentations]
     )
-    
-    train_dataset = MIMIIValveDataset(
+  
+    train_dataset = MIMIISliderDataset(
         split=args.split,
         sources=args.sources,
         targets=args.sources,
@@ -43,11 +43,12 @@ def load_datasets(parser, args):
         samples_per_track=args.samples_per_track,
         use_control=args.use_control,
         task_random= args.task_random,
+        source_random = args.source_random,
         **dataset_kwargs,
     )
     train_dataset = filtering_out_valid(train_dataset)
 
-    valid_dataset = MIMIIValveDataset(
+    valid_dataset = MIMIISliderDataset(
         split=args.split,
         subset=validation_tracks,
         sources=args.sources,
@@ -55,6 +56,7 @@ def load_datasets(parser, args):
         segment=args.val_dur,
         use_control=args.use_control,
         task_random= args.task_random,
+        source_random = args.source_random,
         **dataset_kwargs,
     )
 

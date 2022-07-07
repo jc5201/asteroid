@@ -34,7 +34,7 @@ from keras.layers import Input, Dense
 
 import torch
 import torch.nn as nn
-from asteroid.models import XUMXControl
+from asteroid.models import XUMX, XUMXControl
 import fast_bss_eval
 import museval
 
@@ -65,7 +65,7 @@ logger.addHandler(handler)
 # choose machine type and id
 S1 = 'id_00'
 S2 = 'id_02'
-MACHINE = 'slider'
+MACHINE = 'valve'
 FILE = 'test1.pth'
 
 ########################################################################
@@ -208,7 +208,7 @@ class XUMXSystem(torch.nn.Module):
 
 def xumx_model(path):
     
-    x_unmix = XUMXControl(
+    x_unmix = XUMX(
         window_length=4096,
         input_mean=None,
         input_scale=None,
@@ -263,7 +263,6 @@ def train_list_to_vector_array(file_list,
 
     # 02 loop of file_to_vectorarray
     for idx in tqdm(range(len(file_list)), desc=msg):
-        active_label_sources = {}
         mixture_y = 0
         target_type = os.path.split(os.path.split(os.path.split(file_list[idx])[0])[0])[1]
         if target_source is not None:
@@ -273,16 +272,9 @@ def train_list_to_vector_array(file_list,
         for machine in machine_types:
             filename = file_list[idx].replace(target_type, machine)
             sr, y = file_to_wav(filename)
-            ##############################################################
-            #generate control signal 
-            label = generate_label(y)
-            active_label_sources[machine] = label
-            ##############################################################
             mixture_y = mixture_y + y
             
-        active_labels = torch.stack([active_label_sources[src] for src in machine_types])
-        _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
-        
+        _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda())
         # [src, b, ch, time]
         ys = time[target_idx, 0, 0, :].detach().cpu().numpy()
         
@@ -394,7 +386,7 @@ def dataset_generator(target_dir,
     train_labels = normal_labels[num_eval_normal:]
     eval_normal_files = sum([[fan_file.replace(S1, machine_type) for fan_file in normal_files[:num_eval_normal]] for machine_type in machine_types], [])
     eval_files = numpy.concatenate((eval_normal_files, abnormal_files), axis=0)
-    eval_labels = numpy.concatenate((normal_labels[:num_eval_normal], normal_labels[:num_eval_normal], abnormal_labels), axis=0)  ##TODO 
+    eval_labels = numpy.concatenate((normal_labels[:num_eval_normal], normal_labels[:num_eval_normal], abnormal_labels), axis=0)
     logger.info("train_file num : {num}".format(num=len(train_files)))
     logger.info("eval_file  num : {num}".format(num=len(eval_files)))
 
@@ -444,22 +436,6 @@ class TorchModel(nn.Module):
         return x
 
 
-def generate_label(y):
-    rms_fig = librosa.feature.rms(y)
-    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
-
-    if MACHINE == 'valve':
-        k = int(y.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim, k)
-    else:
-        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
-    label = (rms_trim > min_threshold).type(torch.float)
-    label = label.expand(y.shape[0], -1)
-    return label
-########################################################################
-
-
 ########################################################################
 # main
 ########################################################################
@@ -485,7 +461,7 @@ if __name__ == "__main__":
     for dir_idx, target_dir in enumerate(dirs):
         print("\n===========================")
         print("[{num}/{total}] {dirname}".format(dirname=target_dir, num=dir_idx + 1, total=len(dirs)))
-        print(target_dir)
+
         # dataset param        
         db = os.path.split(os.path.split(os.path.split(target_dir)[0])[0])[1]
         machine_type = 'mix'
@@ -520,10 +496,10 @@ if __name__ == "__main__":
                                                                           db=db)
    
 
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
+        model_path = '/hdd/hdd1/lyj/xumx/output_wo_cont_valve_id46_test1/checkpoints/epoch=999-step=61999.ckpt'
 
-        ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
-        os.makedirs(ae_path, exist_ok= True)
+        ae_path = '/hdd/hdd1/lyj/xumx/ae/wo_cont/{machine}'.format(machine = MACHINE)
+        os.makedirs(ae_path, exist_ok = True)
 
         sep_model = xumx_model(model_path)
         sep_model.eval()
@@ -544,11 +520,11 @@ if __name__ == "__main__":
         
         model = {}
         for target_type in machine_types:
+
             train_dataset = AEDataset(sep_model, train_files, param, target_source=target_type)
             train_loader = torch.utils.data.DataLoader(
                 train_dataset, batch_size=param["fit"]["batch_size"], shuffle=True,
             )
-            
             os.makedirs(os.path.join(ae_path, target_type), exist_ok = True)
             ae_path_target = os.path.join(ae_path, target_type, FILE)
 
@@ -583,31 +559,28 @@ if __name__ == "__main__":
         sdr_pred_abnormal = {mt: [] for mt in machine_types}
 
         eval_types = {mt: [] for mt in machine_types}
-        
+        # ys = 0
+        # for machine in machine_types:
+        #     filename = file_list[idx].replace('fan', machine)
+        #     sr, y = file_to_wav(filename)
+        #     ys = ys + y
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
             machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
-            target_idx = machine_types.index(machine_type)  
+            target_idx = machine_types.index(machine_type)
             y_raw = {}
             mixture_y = 0
-            active_label_sources = {}
             for normal_type in machine_types:
                 if normal_type == machine_type:
                     continue
                 normal_file_name = file_name.replace(machine_type, normal_type).replace('abnormal', 'normal')
                 sr, y = file_to_wav(normal_file_name)
-                label = generate_label(y)
-                active_label_sources[normal_type] = label
                 mixture_y += y 
                 y_raw[normal_type] = y
 
             sr, y = file_to_wav(file_name)
-            label = generate_label(y)
-            active_label_sources[machine_type] = label 
             mixture_y += y
             y_raw[machine_type] = y
-
-            active_labels = torch.stack([active_label_sources[src] for src in machine_types])
-            _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
+            _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda())
             # [src, b, ch, time]
             ys = time[target_idx, 0, 0, :].detach().cpu().numpy()
             
@@ -632,32 +605,8 @@ if __name__ == "__main__":
                 sdr_pred_abnormal[machine_type].append(numpy.mean(sep_sdr))
 
         scores = []
-        anomaly_detect_score = {}
-
         for machine_type in machine_types:
             score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred[eval_types[machine_type]])
-
-            # #code to dump errors
-            # abnormal_score_lst = numpy.array(y_pred[eval_types[machine_type]])[y_true[eval_types[machine_type]].astype(bool)]  #비정상 기계의 score
-            # normal_score_lst = numpy.array(y_pred[eval_types[machine_type]])[numpy.logical_not(y_true[eval_types[machine_type]])] #정상 기계의 score
-
-            # anomaly_detect_score[machine_type]['abnormal_min'] = numpy.min(abnormal_score_lst)
-            # anomaly_detect_score[machine_type]['normal_max'] = numpy.max(normal_score_lst)
-
-            # threshold = anomaly_detect_score[machine_type]['abnormal_min']
-
-            # abnormal_num = np.sum((threshold<=abnormal_score_lst).type(np.float))
-            # normal_num = np.sum((threshold>= normal_score_lst).type(np.float))
-
-            # abnormal_prob = abnormal_num/len(abnormal_score_lst)
-            # normal_prob = normal_num/len(normal_score_lst)
-
-            # logger.info("Normal_score_{} : {}".format(machine_type, anomaly_detect_score[machine_type]['normal_min']))
-            # logger.info("Abnormal_score_{} : {}".format(machine_type, anomaly_detect_score[machine_type]['abnormal_max']))
-            # logger.info("Abnormal_prob_{} : {}".format(machine_type, abnormal_prob))
-            # logger.info("Normal_prob_{} : {}".format(machine_type, normal_prob))
-
-
             logger.info("AUC_{} : {}".format(machine_type, score))
             evaluation_result["AUC_{}".format(machine_type)] = float(score)
             scores.append(score)

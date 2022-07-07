@@ -10,7 +10,7 @@ import librosa
 from itertools import product
 import numpy as np
 
-class MIMIIValveDataset(torch.utils.data.Dataset):
+class MIMIISliderDataset(torch.utils.data.Dataset):
     """MUSDB18 music separation dataset
 
     Folder Structure:
@@ -87,7 +87,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         normal=True,
         use_control=False,
         task_random = False,
-        source_random = False
+        source_random = False,
     ):
 
         self.root = Path(root).expanduser()
@@ -180,9 +180,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
                 # [channel, time]
 
                 if self.normal:
-                    k = int(audio.shape[1]*0.8)
-                    min_threshold, _ = torch.kthvalue(rms_trim, k)
-
+                    min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
                     label = (rms_trim > min_threshold).type(torch.float) 
                     # label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
                     label = label.expand(audio.shape[0], -1)
@@ -226,14 +224,14 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         """Loads input and output tracks"""
         p = Path(self.root, self.split)
         pp = []
-        pp.extend(p.glob(f'valve/id_04/{"normal" if self.normal else "abnormal"}/*.wav'))
+        pp.extend(p.glob(f'slider/id_04/{"normal" if self.normal else "abnormal"}/*.wav'))
         
         for track_path in tqdm.tqdm(pp):
             # print(track_path)
             if self.subset and track_path.stem not in self.subset:
                 # skip this track
                 continue
-           
+            
             source_paths = [Path(str(track_path).replace(self.sources[0], s)) for s in self.sources]
             if not all(sp.exists() for sp in source_paths):
                 print("Exclude track due to non-existing source", track_path)

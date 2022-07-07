@@ -30,15 +30,6 @@ from tqdm import tqdm
 from sklearn import metrics
 from keras.models import Model
 from keras.layers import Input, Dense
-
-
-import torch
-import torch.nn as nn
-from asteroid.models import XUMXControl
-import fast_bss_eval
-import museval
-
-import numpy as np
 ########################################################################
 
 
@@ -62,11 +53,48 @@ formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 ########################################################################
-# choose machine type and id
-S1 = 'id_00'
-S2 = 'id_02'
-MACHINE = 'slider'
-FILE = 'test1.pth'
+
+
+########################################################################
+# visualizer
+########################################################################
+class visualizer(object):
+    def __init__(self):
+        import matplotlib.pyplot as plt
+        self.plt = plt
+        self.fig = self.plt.figure(figsize=(30, 10))
+        self.plt.subplots_adjust(wspace=0.3, hspace=0.3)
+
+    def loss_plot(self, loss, val_loss):
+        """
+        Plot loss curve.
+        loss : list [ float ]
+            training loss time series.
+        val_loss : list [ float ]
+            validation loss time series.
+        return   : None
+        """
+        ax = self.fig.add_subplot(1, 1, 1)
+        ax.cla()
+        ax.plot(loss)
+        ax.plot(val_loss)
+        ax.set_title("Model loss")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.legend(["Train", "Test"], loc="upper right")
+
+    def save_figure(self, name):
+        """
+        Save figure.
+        name : str
+            save .png file path.
+        return : None
+        """
+        self.plt.savefig(name)
+
+
+########################################################################
+
 
 ########################################################################
 # file I/O
@@ -117,7 +145,7 @@ def file_load(wav_name, mono=False):
         logger.error("file_broken or not exists!! : {}".format(wav_name))
 
 
-def demux_wav(wav_name, channel=1):
+def demux_wav(wav_name, channel=0):
     """
     demux .wav file.
     wav_name : str
@@ -134,7 +162,7 @@ def demux_wav(wav_name, channel=1):
         if multi_channel_data.ndim <= 1:
             return sr, multi_channel_data
 
-        return sr, numpy.array(multi_channel_data)[:channel, :]
+        return sr, numpy.array(multi_channel_data)[channel, :]
 
     except ValueError as msg:
         logger.warning(f'{msg}')
@@ -148,7 +176,7 @@ def demux_wav(wav_name, channel=1):
 ########################################################################
 
 def file_to_wav(file_name):
-    sr, y = demux_wav(file_name, channel=2)
+    sr, y = demux_wav(file_name)
     return sr, y
 
 def wav_to_vector_array(sr, y,
@@ -194,58 +222,13 @@ def wav_to_vector_array(sr, y,
     return vectorarray
 
 
-def bandwidth_to_max_bin(rate, n_fft, bandwidth):
-    freqs = numpy.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
-
-    return numpy.max(numpy.where(freqs <= bandwidth)[0]) + 1
-
-
-class XUMXSystem(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.model = None
-
-
-def xumx_model(path):
-    
-    x_unmix = XUMXControl(
-        window_length=4096,
-        input_mean=None,
-        input_scale=None,
-        nb_channels=2,
-        hidden_size=512,
-        in_chan=4096,
-        n_hop=1024,
-        sources=['s1', 's2'],
-        max_bin=bandwidth_to_max_bin(16000, 4096, 16000),
-        bidirectional=True,
-        sample_rate=16000,
-        spec_power=1,
-        return_time_signals=True,
-    )
-
-    conf = torch.load(path, map_location="cpu")
-
-    system = XUMXSystem()
-    system.model = x_unmix
-
-    system.load_state_dict(conf['state_dict'], strict=False)
-
-    return system.model
-
-
-machine_types = [S1, S2]
-num_eval_normal = 250
-
-
 def train_list_to_vector_array(file_list,
                          msg="calc...",
                          n_mels=64,
                          frames=5,
                          n_fft=1024,
                          hop_length=512,
-                         power=2.0,
-                         target_source=None):
+                         power=2.0):
     """
     convert the file_list to a vector array.
     file_to_vector_array() is iterated, and the output vector array is concatenated.
@@ -263,28 +246,13 @@ def train_list_to_vector_array(file_list,
 
     # 02 loop of file_to_vectorarray
     for idx in tqdm(range(len(file_list)), desc=msg):
-        active_label_sources = {}
-        mixture_y = 0
-        target_type = os.path.split(os.path.split(os.path.split(file_list[idx])[0])[0])[1]
-        if target_source is not None:
-            target_idx = machine_types.index(target_source)
-        else:
-            target_idx = machine_types.index(target_type)
+
+        machine_types = ['id_04', 'id_06']
+        ys = 0
         for machine in machine_types:
-            filename = file_list[idx].replace(target_type, machine)
+            filename = file_list[idx].replace('id_04', machine)
             sr, y = file_to_wav(filename)
-            ##############################################################
-            #generate control signal 
-            label = generate_label(y)
-            active_label_sources[machine] = label
-            ##############################################################
-            mixture_y = mixture_y + y
-            
-        active_labels = torch.stack([active_label_sources[src] for src in machine_types])
-        _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
-        
-        # [src, b, ch, time]
-        ys = time[target_idx, 0, 0, :].detach().cpu().numpy()
+            ys = ys + y
         
         vector_array = wav_to_vector_array(sr, ys,
                                             n_mels=n_mels,
@@ -299,33 +267,6 @@ def train_list_to_vector_array(file_list,
         dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :] = vector_array
 
     return dataset
-
-class AEDataset(torch.utils.data.Dataset):
-    def __init__(self, 
-            sep_model, 
-            file_list,
-            param,
-            target_source=None,
-            ):
-        self.sep_model = sep_model
-        self.file_list = file_list
-        self.target_source = target_source
-
-        self.data_vector = train_list_to_vector_array(self.file_list,
-                                            msg="generate train_dataset",
-                                            n_mels=param["feature"]["n_mels"],
-                                            frames=param["feature"]["frames"],
-                                            n_fft=param["feature"]["n_fft"],
-                                            hop_length=param["feature"]["hop_length"],
-                                            power=param["feature"]["power"],
-                                            target_source=target_source)
-        
-    
-    def __getitem__(self, index):
-        return torch.Tensor(self.data_vector[index, :])
-    
-    def __len__(self):
-        return self.data_vector.shape[0]
 
 
 def dataset_generator(target_dir,
@@ -360,17 +301,17 @@ def dataset_generator(target_dir,
     logger.info("target_dir : {}".format(target_dir))
 
     # 01 normal list generate
+    machine_types = ['id_04', 'id_06']
     normal_files = sorted(glob.glob(
         os.path.abspath("{dir}/{normal_dir_name}/*.{ext}".format(dir=target_dir,
                                                                  normal_dir_name=normal_dir_name,
-                                                                ext=ext))))
+                                                                 ext=ext))))
     normal_len = [len(glob.glob(
-        os.path.abspath("{dir}/{normal_dir_name}/*.{ext}".format(dir=target_dir.replace(S1, mt),
+        os.path.abspath("{dir}/{normal_dir_name}/*.{ext}".format(dir=target_dir.replace('id_04', mt),
                                                                  normal_dir_name=normal_dir_name,
-                                                                 ext=ext)))) for mt in machine_types]   #dataset 중에서 가장 짧은 것 기준
+                                                                 ext=ext)))) for mt in machine_types]
     normal_len = min(min(normal_len), len(normal_files))
     normal_files = normal_files[:normal_len]
-
 
     normal_labels = numpy.zeros(len(normal_files))
     if len(normal_files) == 0:
@@ -382,19 +323,20 @@ def dataset_generator(target_dir,
                                                                    abnormal_dir_name=abnormal_dir_name,
                                                                    ext=ext))))
     abnormal_files.extend(sorted(glob.glob(
-        os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir.replace(S1, S2),
+        os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir.replace('id_04', 'id_06'),
                                                                    abnormal_dir_name=abnormal_dir_name,
-                                                                 ext=ext)))))                                               
+                                                                 ext=ext)))))         
+
     abnormal_labels = numpy.ones(len(abnormal_files))
     if len(abnormal_files) == 0:
         logger.exception("no_wav_data!!")
 
     # 03 separate train & eval
+    num_eval_normal = 250
     train_files = normal_files[num_eval_normal:]
     train_labels = normal_labels[num_eval_normal:]
-    eval_normal_files = sum([[fan_file.replace(S1, machine_type) for fan_file in normal_files[:num_eval_normal]] for machine_type in machine_types], [])
-    eval_files = numpy.concatenate((eval_normal_files, abnormal_files), axis=0)
-    eval_labels = numpy.concatenate((normal_labels[:num_eval_normal], normal_labels[:num_eval_normal], abnormal_labels), axis=0)  ##TODO 
+    eval_files = numpy.concatenate((normal_files[:num_eval_normal], abnormal_files), axis=0)
+    eval_labels = numpy.concatenate((normal_labels[:num_eval_normal], abnormal_labels), axis=0)
     logger.info("train_file num : {num}".format(num=len(train_files)))
     logger.info("eval_file  num : {num}".format(num=len(eval_files)))
 
@@ -422,41 +364,7 @@ def keras_model(inputDim):
 
     return Model(inputs=inputLayer, outputs=h)
 
-class TorchModel(nn.Module):
-    def __init__(self, dim_input):
-        super(TorchModel,self).__init__()
-        self.ff = nn.Sequential(
-            nn.Linear(dim_input, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 8),
-            nn.ReLU(),
-            nn.Linear(8, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, dim_input),
-        )
 
-    def forward(self, x):
-        x = self.ff(x)
-        return x
-
-
-def generate_label(y):
-    rms_fig = librosa.feature.rms(y)
-    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
-
-    if MACHINE == 'valve':
-        k = int(y.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim, k)
-    else:
-        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
-    label = (rms_trim > min_threshold).type(torch.float)
-    label = label.expand(y.shape[0], -1)
-    return label
 ########################################################################
 
 
@@ -474,9 +382,14 @@ if __name__ == "__main__":
     os.makedirs(param["model_directory"], exist_ok=True)
     os.makedirs(param["result_directory"], exist_ok=True)
 
+    # initialize the visualizer
+    visualizer = visualizer()
+
+    machine_types = ['id_04', 'id_06']
 
     # load base_directory list
-    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/{machine}/{source}".format(base=param["base_directory"], machine = MACHINE, source = S1))))  
+    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/slider/id_04".format(base=param["base_directory"]))))  # {base}/0dB/fan/id_00/normal/00000000.wav
+
     # setup the result
     result_file = "{result}/{file_name}".format(result=param["result_directory"], file_name=param["result_file"])
     results = {}
@@ -485,186 +398,132 @@ if __name__ == "__main__":
     for dir_idx, target_dir in enumerate(dirs):
         print("\n===========================")
         print("[{num}/{total}] {dirname}".format(dirname=target_dir, num=dir_idx + 1, total=len(dirs)))
-        print(target_dir)
+
         # dataset param        
         db = os.path.split(os.path.split(os.path.split(target_dir)[0])[0])[1]
         machine_type = 'mix'
-        machine_id = os.path.split(target_dir)[1]  ##TODO: machine id 고치기
+        machine_id = os.path.split(target_dir)[1]
         # target_dir = target_dir.replace('fan', '*')
 
         # setup path
         evaluation_result = {}
-        train_pickle = "{pickle}/src_train_{machine_type}_{machine_id}_{db}.pickle".format(pickle=param["pickle_directory"],
+        train_pickle = "{pickle}/train_{machine_type}_{machine_id}_{db}.pickle".format(pickle=param["pickle_directory"],
                                                                                        machine_type=machine_type,
                                                                                        machine_id=machine_id, db=db)
-        eval_files_pickle = "{pickle}/src_eval_files_{machine_type}_{machine_id}_{db}.pickle".format(
+        eval_files_pickle = "{pickle}/eval_files_{machine_type}_{machine_id}_{db}.pickle".format(
                                                                                        pickle=param["pickle_directory"],
                                                                                        machine_type=machine_type,
                                                                                        machine_id=machine_id,
                                                                                        db=db)
-        eval_labels_pickle = "{pickle}/src_eval_labels_{machine_type}_{machine_id}_{db}.pickle".format(
+        eval_labels_pickle = "{pickle}/eval_labels_{machine_type}_{machine_id}_{db}.pickle".format(
                                                                                        pickle=param["pickle_directory"],
                                                                                        machine_type=machine_type,
                                                                                        machine_id=machine_id,
                                                                                        db=db)
-        model_file = "{model}/src_model_{machine_type}_{machine_id}_{db}.hdf5".format(model=param["model_directory"],
+        model_file = "{model}/model_{machine_type}_{machine_id}_{db}.hdf5".format(model=param["model_directory"],
                                                                                   machine_type=machine_type,
                                                                                   machine_id=machine_id,
                                                                                   db=db)
-        history_img = "{model}/src_history_{machine_type}_{machine_id}_{db}.png".format(model=param["model_directory"],
+        history_img = "{model}/history_{machine_type}_{machine_id}_{db}.png".format(model=param["model_directory"],
                                                                                     machine_type=machine_type,
                                                                                     machine_id=machine_id,
                                                                                     db=db)
         evaluation_result_key = "{machine_type}_{machine_id}_{db}".format(machine_type=machine_type,
                                                                           machine_id=machine_id,
                                                                           db=db)
-   
-
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
-
-        ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
-        os.makedirs(ae_path, exist_ok= True)
-
-        sep_model = xumx_model(model_path)
-        sep_model.eval()
-        sep_model = sep_model.cuda()
-
 
         # dataset generator
         print("============== DATASET_GENERATOR ==============")
-        # if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
-        #     train_files, train_labels = load_pickle(train_pickle)
+        # if os.path.exists(train_pickle):
+        #     # train_data = load_pickle(train_pickle)
+        #     # if os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
         #     eval_files = load_pickle(eval_files_pickle)
         #     eval_labels = load_pickle(eval_labels_pickle)
         # else:
         train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
-        save_pickle(train_pickle, (train_files, train_labels))
+
+        train_data = train_list_to_vector_array(train_files,
+                                            msg="generate train_dataset",
+                                            n_mels=param["feature"]["n_mels"],
+                                            frames=param["feature"]["frames"],
+                                            n_fft=param["feature"]["n_fft"],
+                                            hop_length=param["feature"]["hop_length"],
+                                            power=param["feature"]["power"])
+
+        save_pickle(train_pickle, train_data)
         save_pickle(eval_files_pickle, eval_files)
         save_pickle(eval_labels_pickle, eval_labels)
-        
-        model = {}
-        for target_type in machine_types:
-            train_dataset = AEDataset(sep_model, train_files, param, target_source=target_type)
-            train_loader = torch.utils.data.DataLoader(
-                train_dataset, batch_size=param["fit"]["batch_size"], shuffle=True,
-            )
-            
-            os.makedirs(os.path.join(ae_path, target_type), exist_ok = True)
-            ae_path_target = os.path.join(ae_path, target_type, FILE)
 
-            # model training
-            print("============== MODEL TRAINING ==============")
-            dim_input = train_dataset.data_vector.shape[1]
-            model[target_type] = TorchModel(dim_input).cuda()
-            optimizer = torch.optim.Adam(model[target_type].parameters(), lr=1.0e-4)
-            loss_fn = nn.MSELoss()
+        # model training
+        print("============== MODEL TRAINING ==============")
+        model = keras_model(param["feature"]["n_mels"] * param["feature"]["frames"])
+        model.summary()
 
-            for epoch in range(param["fit"]["epochs"]):
-                losses = []
-                for batch in train_loader:
-                    batch = batch.cuda()
-                    pred = model[target_type](batch)
-                    loss = loss_fn(pred, batch)
+        # training
+        if os.path.exists(model_file):
+            model.load_weights(model_file)
+        else:
+            model.compile(**param["fit"]["compile"])
+            history = model.fit(train_data,
+                                train_data,
+                                epochs=param["fit"]["epochs"],
+                                batch_size=param["fit"]["batch_size"],
+                                shuffle=param["fit"]["shuffle"],
+                                validation_split=param["fit"]["validation_split"],
+                                verbose=param["fit"]["verbose"])
 
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                    losses.append(loss.item())
-                if epoch % 10 == 0:
-                    print(f"epoch {epoch}: loss {sum(losses) / len(losses)}")
-            torch.save(model[target_type].state_dict(), ae_path_target)
-            model[target_type].eval()
-               
+            visualizer.loss_plot(history.history["loss"], history.history["val_loss"])
+            visualizer.save_figure(history_img)
+            model.save_weights(model_file)
+
         # evaluation
         print("============== EVALUATION ==============")
         y_pred = numpy.array([0. for k in eval_labels])
         y_true = numpy.array(eval_labels)
-        sdr_pred_normal = {mt: [] for mt in machine_types}
-        sdr_pred_abnormal = {mt: [] for mt in machine_types}
 
+        machine_types = ['id_04', 'id_06']
         eval_types = {mt: [] for mt in machine_types}
-        
+        # ys = 0
+        # for machine in machine_types:
+        #     filename = file_list[idx].replace('fan', machine)
+        #     sr, y = file_to_wav(filename)
+        #     ys = ys + y
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
-            machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
-            target_idx = machine_types.index(machine_type)  
-            y_raw = {}
-            mixture_y = 0
-            active_label_sources = {}
-            for normal_type in machine_types:
-                if normal_type == machine_type:
-                    continue
-                normal_file_name = file_name.replace(machine_type, normal_type).replace('abnormal', 'normal')
-                sr, y = file_to_wav(normal_file_name)
-                label = generate_label(y)
-                active_label_sources[normal_type] = label
-                mixture_y += y 
-                y_raw[normal_type] = y
+            try:
+                machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
+                ys = 0
+                for normal_type in machine_types:
+                    if normal_type == machine_type:
+                        continue
+                    normal_file_name = file_name.replace(machine_type, normal_type).replace('abnormal', 'normal')
+                    sr, y = demux_wav(normal_file_name)
+                    ys += y
+                    
+                sr, y = demux_wav(file_name)
+                ys += y
 
-            sr, y = file_to_wav(file_name)
-            label = generate_label(y)
-            active_label_sources[machine_type] = label 
-            mixture_y += y
-            y_raw[machine_type] = y
-
-            active_labels = torch.stack([active_label_sources[src] for src in machine_types])
-            _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
-            # [src, b, ch, time]
-            ys = time[target_idx, 0, 0, :].detach().cpu().numpy()
-            
-            data = wav_to_vector_array(sr, ys,
-                                        n_mels=param["feature"]["n_mels"],
-                                        frames=param["feature"]["frames"],
-                                        n_fft=param["feature"]["n_fft"],
-                                        hop_length=param["feature"]["hop_length"],
-                                        power=param["feature"]["power"])
-            data = torch.Tensor(data).cuda()
-            error = torch.mean(((data - model[machine_type](data)) ** 2), dim=1)
-
-            sep_sdr, _, _, _ = museval.evaluate(numpy.expand_dims(y_raw[machine_type][0, :ys.shape[0]], axis=(0,2)), 
-                                        numpy.expand_dims(ys, axis=(0,2)))
-
-            y_pred[num] = torch.mean(error).detach().cpu().numpy()
-            eval_types[machine_type].append(num)
-
-            if num < num_eval_normal * 2: # normal file
-                sdr_pred_normal[machine_type].append(numpy.mean(sep_sdr))
-            else: # abnormal file
-                sdr_pred_abnormal[machine_type].append(numpy.mean(sep_sdr))
+                data = wav_to_vector_array(sr, ys,
+                                            n_mels=param["feature"]["n_mels"],
+                                            frames=param["feature"]["frames"],
+                                            n_fft=param["feature"]["n_fft"],
+                                            hop_length=param["feature"]["hop_length"],
+                                            power=param["feature"]["power"])
+                error = numpy.mean(numpy.square(data - model.predict(data)), axis=1)
+                y_pred[num] = numpy.mean(error)
+                if num <= 250:
+                    for mt in machine_types:
+                        eval_types[mt].append(num)
+                else:
+                    eval_types[machine_type].append(num)
+            except:
+                logger.warning("File broken!!: {}".format(file_name))
 
         scores = []
-        anomaly_detect_score = {}
-
         for machine_type in machine_types:
             score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred[eval_types[machine_type]])
-
-            # #code to dump errors
-            # abnormal_score_lst = numpy.array(y_pred[eval_types[machine_type]])[y_true[eval_types[machine_type]].astype(bool)]  #비정상 기계의 score
-            # normal_score_lst = numpy.array(y_pred[eval_types[machine_type]])[numpy.logical_not(y_true[eval_types[machine_type]])] #정상 기계의 score
-
-            # anomaly_detect_score[machine_type]['abnormal_min'] = numpy.min(abnormal_score_lst)
-            # anomaly_detect_score[machine_type]['normal_max'] = numpy.max(normal_score_lst)
-
-            # threshold = anomaly_detect_score[machine_type]['abnormal_min']
-
-            # abnormal_num = np.sum((threshold<=abnormal_score_lst).type(np.float))
-            # normal_num = np.sum((threshold>= normal_score_lst).type(np.float))
-
-            # abnormal_prob = abnormal_num/len(abnormal_score_lst)
-            # normal_prob = normal_num/len(normal_score_lst)
-
-            # logger.info("Normal_score_{} : {}".format(machine_type, anomaly_detect_score[machine_type]['normal_min']))
-            # logger.info("Abnormal_score_{} : {}".format(machine_type, anomaly_detect_score[machine_type]['abnormal_max']))
-            # logger.info("Abnormal_prob_{} : {}".format(machine_type, abnormal_prob))
-            # logger.info("Normal_prob_{} : {}".format(machine_type, normal_prob))
-
-
             logger.info("AUC_{} : {}".format(machine_type, score))
             evaluation_result["AUC_{}".format(machine_type)] = float(score)
             scores.append(score)
-            logger.info("SDR_normal_{} : {}".format(machine_type, sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type])))
-            logger.info("SDR_abnormal_{} : {}".format(machine_type, sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type])))
-            evaluation_result["SDR_normal_{}".format(machine_type)] = float(sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type]))
-            evaluation_result["SDR_abnormal_{}".format(machine_type)] = float(sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type]))
         score = sum(scores) / len(scores)
         logger.info("AUC : {}".format(score))
         evaluation_result["AUC"] = float(score)
@@ -677,3 +536,4 @@ if __name__ == "__main__":
     with open(result_file, "w") as f:
         f.write(yaml.dump(results, default_flow_style=False))
     print("===========================")
+########################################################################
