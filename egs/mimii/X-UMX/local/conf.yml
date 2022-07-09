@@ -28,10 +28,10 @@ data:
     - gain
     - delay
   sources:
-    - id_04
-    - id_06
-  use_control: False
-  task_random: True
+    - id_00
+    - id_02
+  use_control: True
+  task_random: False
   source_random: False
 # Network config
 model:
@@ -43,4 +43,5 @@ model:
   hidden_size: 512
   bandwidth: 16000
   nb_channels: 2
+  nb_control_channels: 8
   spec_power: 1

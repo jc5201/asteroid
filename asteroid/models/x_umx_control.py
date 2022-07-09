@@ -54,6 +54,7 @@ class XUMXControl(BaseModel):
         n_hop=1024,
         hidden_size=512,
         nb_channels=2,
+        nb_control_channels=2,
         sample_rate=44100,
         nb_layers=3,
         input_mean=None,
@@ -71,6 +72,7 @@ class XUMXControl(BaseModel):
         self.sources = sources
         self._return_time_signals = return_time_signals
         self.nb_channels = nb_channels
+        self.nb_control_channels = nb_control_channels
         self.nb_layers = nb_layers
         self.bidirectional = bidirectional
         self.nb_output_bins = in_chan // 2 + 1
@@ -107,7 +109,7 @@ class XUMXControl(BaseModel):
             src_enc[src] = _InstrumentBackboneEnc(
                 nb_bins=self.max_bin  , ##TODO: +1 지웠음
                 hidden_size=hidden_size,
-                nb_channels=nb_channels*2,
+                nb_channels=nb_channels + nb_control_channels,
             )
 
             # Define Recurrent Lyaers.
@@ -125,6 +127,7 @@ class XUMXControl(BaseModel):
                 nb_output_bins=self.nb_output_bins,
                 hidden_size=hidden_size,
                 nb_channels=nb_channels,
+                nb_control_channels=nb_control_channels,
             )
 
             mean_scale["input_mean_{}".format(src)] = Parameter(input_mean.clone())
@@ -229,7 +232,7 @@ class XUMXControl(BaseModel):
         for i, src in enumerate(self.sources):
             # TODO
             # TODO controls_spec channel
-            x_tmp = torch.cat([cross_2, controls_spec[i, :, :, 0, :]], dim = 2)
+            x_tmp = torch.cat([cross_2, controls_spec[i, :, :, :, 0]], dim = 2)
             # controls_spec
             x_tmp = self.layer_dec[src](x_tmp, shapes)
             x_tmp *= self.mean_scale["output_scale_{}".format(src)]
@@ -298,10 +301,11 @@ class _InstrumentBackboneEnc(nn.Module):
             Linear(self.max_bin * nb_channels, hidden_size, bias=False),
             BatchNorm1d(hidden_size),
         )
+        self.nb_channels = nb_channels
 
     def forward(self, x, shapes):
         nb_frames, nb_samples, nb_channels, _ = shapes
-        x = self.enc(x.reshape(-1, nb_channels* 2 * self.max_bin))
+        x = self.enc(x.reshape(-1, self.nb_channels * self.max_bin))
         x = x.reshape(nb_frames, nb_samples, self.hidden_size)
 
         # squash range to [-1, 1]
@@ -325,11 +329,12 @@ class _InstrumentBackboneDec(nn.Module):
         nb_output_bins,
         hidden_size=512,
         nb_channels=2,
+        nb_control_channels=0,
     ):
         super().__init__()
         self.nb_output_bins = nb_output_bins
         self.dec = nn.Sequential(
-            Linear(in_features=hidden_size * 2 + self.nb_output_bins, out_features=hidden_size, bias=False),
+            Linear(in_features=hidden_size * 2 + nb_control_channels, out_features=hidden_size, bias=False),
             BatchNorm1d(hidden_size),
             nn.ReLU(),
             Linear(

@@ -31,7 +31,7 @@ def load_datasets(parser, args):
         [globals()["_augment_" + aug] for aug in args.source_augmentations]
     )
   
-    train_dataset = MIMIISliderDataset(
+    train_dataset = MIMIIValveDataset(
         split=args.split,
         sources=args.sources,
         targets=args.sources,
@@ -48,11 +48,12 @@ def load_datasets(parser, args):
     )
     train_dataset = filtering_out_valid(train_dataset)
 
-    valid_dataset = MIMIISliderDataset(
+    valid_dataset = MIMIIValveDataset(
         split=args.split,
         subset=validation_tracks,
         sources=args.sources,
         targets=args.sources,
+        source_augmentations=source_augmentations,
         segment=args.val_dur,
         use_control=args.use_control,
         task_random= args.task_random,
