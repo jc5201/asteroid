@@ -3,7 +3,7 @@
   {
    "cell_type": "code",
    "execution_count": 1,
-   "id": "be317a57",
+   "id": "88195427",
    "metadata": {},
    "outputs": [],
    "source": [
@@ -41,16 +41,16 @@
   {
    "cell_type": "code",
    "execution_count": 2,
-   "id": "0aad42d4",
+   "id": "bf1ffed8",
    "metadata": {},
    "outputs": [],
    "source": [
     "#set machine and id\n",
     "MACHINE = 'valve'\n",
-    "S1 = 'id_00'\n",
-    "S2 = 'id_02'\n",
+    "S1 = 'id_04'\n",
+    "S2 = 'id_06'\n",
     "FILE = 'test2.pth'\n",
-    "model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'\n",
+    "model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve3/checkpoints/epoch=998-step=44954.ckpt'\n",
     "\n",
     "\n",
     "# choose wave file and status\n",
@@ -63,7 +63,7 @@
   {
    "cell_type": "code",
    "execution_count": 3,
-   "id": "31cb9603",
+   "id": "454f2484",
    "metadata": {},
    "outputs": [],
    "source": [
@@ -84,8 +84,8 @@
   },
   {
    "cell_type": "code",
-   "execution_count": 4,
-   "id": "11854dc7",
+   "execution_count": 5,
+   "id": "62b184d1",
    "metadata": {},
    "outputs": [],
    "source": [
@@ -390,8 +390,8 @@
   },
   {
    "cell_type": "code",
-   "execution_count": 5,
-   "id": "958d4b2c",
+   "execution_count": 6,
+   "id": "db24328c",
    "metadata": {},
    "outputs": [],
    "source": [
@@ -403,22 +403,10 @@
   },
   {
    "cell_type": "code",
-   "execution_count": 6,
-   "id": "979f95aa",
+   "execution_count": 7,
+   "id": "7d902f30",
    "metadata": {},
-   "outputs": [
-    {
-     "ename": "FileNotFoundError",
-     "evalue": "[Errno 2] No such file or directory: 'baseline.yaml'",
-     "output_type": "error",
-     "traceback": [
-      "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
-      "\u001b[0;31mFileNotFoundError\u001b[0m                         Traceback (most recent call last)",
-      "Input \u001b[0;32mIn [6]\u001b[0m, in \u001b[0;36m<cell line: 1>\u001b[0;34m()\u001b[0m\n\u001b[0;32m----> 1\u001b[0m \u001b[38;5;28;01mwith\u001b[39;00m \u001b[38;5;28;43mopen\u001b[39;49m\u001b[43m(\u001b[49m\u001b[38;5;124;43m\"\u001b[39;49m\u001b[38;5;124;43mbaseline.yaml\u001b[39;49m\u001b[38;5;124;43m\"\u001b[39;49m\u001b[43m)\u001b[49m \u001b[38;5;28;01mas\u001b[39;00m stream:\n\u001b[1;32m      2\u001b[0m     param \u001b[38;5;241m=\u001b[39m yaml\u001b[38;5;241m.\u001b[39msafe_load(stream)\n\u001b[1;32m      3\u001b[0m train_files, train_labels, eval_files, eval_labels \u001b[38;5;241m=\u001b[39m dataset_generator(\u001b[38;5;124m\"\u001b[39m\u001b[38;5;124m/dev/shm/mimii/6dB/\u001b[39m\u001b[38;5;132;01m{machine}\u001b[39;00m\u001b[38;5;124m/\u001b[39m\u001b[38;5;132;01m{source}\u001b[39;00m\u001b[38;5;124m\"\u001b[39m\u001b[38;5;241m.\u001b[39mformat(machine \u001b[38;5;241m=\u001b[39m MACHINE, source \u001b[38;5;241m=\u001b[39m S1))\n",
-      "\u001b[0;31mFileNotFoundError\u001b[0m: [Errno 2] No such file or directory: 'baseline.yaml'"
-     ]
-    }
-   ],
+   "outputs": [],
    "source": [
     "with open(\"baseline.yaml\") as stream:\n",
     "    param = yaml.safe_load(stream)\n",
@@ -428,8 +416,8 @@
   },
   {
    "cell_type": "code",
-   "execution_count": null,
-   "id": "20696923",
+   "execution_count": 8,
+   "id": "04e7f59e",
    "metadata": {},
    "outputs": [],
    "source": [
@@ -446,16 +434,40 @@
   },
   {
    "cell_type": "code",
-   "execution_count": null,
-   "id": "e9148e87",
+   "execution_count": 9,
+   "id": "de208e87",
    "metadata": {},
-   "outputs": [],
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "  0%|                                                                                                                                                                                                             | 0/740 [00:00<?, ?it/s]/home/lyj/.conda/envs/xumx/lib/python3.8/site-packages/torch/functional.py:770: UserWarning: istft will require a complex-valued input tensor in a future PyTorch release. Matching the output from stft with return_complex=True.  (Triggered internally at  /opt/conda/conda-bld/pytorch_1646755903507/work/aten/src/ATen/native/SpectralOps.cpp:950.)\n",
+      "  return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore[attr-defined]\n",
+      "100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 740/740 [00:32<00:00, 22.93it/s]"
+     ]
+    },
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "SCORE: 0.36373333333333335\n",
+      "SCORE: 0.5076666666666667\n"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "\n"
+     ]
+    }
+   ],
    "source": [
     "# find best threshold\n",
     "y_pred = numpy.array([0. for k in eval_labels])\n",
-    "y_pred_label = numpy.array([0. for k in eval_labels])\n",
-    "accuracy = {}\n",
     "y_true = numpy.array(eval_labels)\n",
+    "\n",
     "eval_types = {mt: [] for mt in machine_types}\n",
     "\n",
     "for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):\n",
@@ -503,22 +515,13 @@
     "    print(\"SCORE:\", score)\n",
     "    j = tpr-fpr\n",
     "    idx = numpy.argmax(j)\n",
-    "    threshold_lst.append(numpy.array(threshold[idx]).astype('float'))\n",
-    "    \n",
-    "\n",
-    "for idx, machine_type in enumerate(machine_types):\n",
-    "    threshold = torch.Tensor(threshold_lst[idx]).cuda()\n",
-    "    threshold_ = threshold*torch.ones_like(eval_types[machine_type])\n",
-    "    y_pred_label[machine_type] = (eval_types[machine_type]>=threshold_).astype(float)\n",
-    "    accuracy[machine_type] = sum(y_pred_label[machine_type])/len(y_pred_label[machine_type])\n",
-    "\n",
-    "print(accuracy)\n"
+    "    threshold_lst.append(numpy.array(threshold[idx]).astype('float'))\n"
    ]
   },
   {
    "cell_type": "code",
-   "execution_count": null,
-   "id": "517c9ef9",
+   "execution_count": 10,
+   "id": "8c066d63",
    "metadata": {},
    "outputs": [],
    "source": [
@@ -556,8 +559,8 @@
   },
   {
    "cell_type": "code",
-   "execution_count": null,
-   "id": "196ae7a9",
+   "execution_count": 11,
+   "id": "ee6d2be6",
    "metadata": {},
    "outputs": [],
    "source": [
@@ -578,8 +581,8 @@
   },
   {
    "cell_type": "code",
-   "execution_count": null,
-   "id": "24582119",
+   "execution_count": 12,
+   "id": "7c7b4eaf",
    "metadata": {},
    "outputs": [],
    "source": [
@@ -588,10 +591,20 @@
   },
   {
    "cell_type": "code",
-   "execution_count": null,
-   "id": "9c3f7c4c",
+   "execution_count": 13,
+   "id": "18acaff1",
    "metadata": {},
-   "outputs": [],
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Anomaly classification result:\n",
+      "valve_id_04 is abnormal, and is detected to be normal\n",
+      "valve_id_06 is normal, and is detected to be normal\n"
+     ]
+    }
+   ],
    "source": [
     "print(\"Anomaly classification result:\")\n",
     "print(\"{machine}_{source} is {status}, and is detected to be {status_pred}\".format(machine = MACHINE, source = S1, status = status_s1, status_pred = anomaly_result[0]))\n",
@@ -601,7 +614,7 @@
   {
    "cell_type": "code",
    "execution_count": null,
-   "id": "5df50138",
+   "id": "4c22354c",
    "metadata": {},
    "outputs": [],
    "source": []
