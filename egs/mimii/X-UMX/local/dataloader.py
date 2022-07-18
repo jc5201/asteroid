@@ -1,16 +1,16 @@
-from asteroid.data import MIMIIDataset, MIMIIValveDataset, MIMIISliderDataset
+from asteroid.data import MIMIIDataset, MIMIIValveDataset, MIMIISliderDataset, ConveyerDataset
 import torch
 from pathlib import Path
 import numpy as np
 import random
 
-train_tracks = [f"{n:0>8}" for n in range(10, 410)]
+train_tracks = [f"{n:0>3}" for n in range(10, 350)]
 
 validation_tracks = [
-    "00000000",
-    "00000001",
-    "00000002",
-    "00000003",
+    "Track002",
+    "Track003",
+    "Track004",
+    "Track005",
 ]
 
 
@@ -31,7 +31,7 @@ def load_datasets(parser, args):
         [globals()["_augment_" + aug] for aug in args.source_augmentations]
     )
   
-    train_dataset = MIMIISliderDataset(
+    train_dataset = ConveyerDataset(
         split=args.split,
         sources=args.sources,
         targets=args.sources,
@@ -48,12 +48,13 @@ def load_datasets(parser, args):
     )
     train_dataset = filtering_out_valid(train_dataset)
 
-    valid_dataset = MIMIISliderDataset(
+    valid_dataset = ConveyerDataset(
         split=args.split,
         subset=validation_tracks,
         sources=args.sources,
         targets=args.sources,
         segment=args.val_dur,
+        sample_rate=args.sample_rate,
         use_control=args.use_control,
         task_random= args.task_random,
         source_random = args.source_random,
@@ -74,7 +75,6 @@ def filtering_out_valid(input_dataset):
         for tmp in input_dataset.tracks
         if not (str(tmp["path"]).split("/")[-1] in validation_tracks)
     ]
-
     return input_dataset
 
 
