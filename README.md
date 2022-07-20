@@ -199,6 +199,16 @@ If you loved using Asteroid and you want to cite us, use this :
 }
 ```
 
+## Run the code
+To run X-UMX change the configuration file considering the type of data and the use of control signal.
+```bash
+# First change the configuration 
+cd egs/mimii/X-UMX/local
+```
+with control signal in MIMII dataset:
+
+without control signal:
+
 [comment]: <> (Badge)
 [miniconda]: https://conda.io/miniconda.html
 [codecov-badge]: https://codecov.io/gh/asteroid-team/asteroid/branch/master/graph/badge.svg
