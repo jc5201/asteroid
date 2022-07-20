@@ -1,0 +1,13 @@
+# Minimal package to use MIMII dataset baseline.
+keras
+Keras-Applications
+Keras-Preprocessing
+matplotlib
+numpy
+PyYAML
+scikit-learn
+librosa
+audioread
+setuptools
+tensorflow
+fast_bss_eval

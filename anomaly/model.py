@@ -83,6 +83,6 @@ def xumx_model(path):
     system = XUMXSystem()
     system.model = x_unmix
 
-    system.load_state_dict(conf['state_dict'], strict=True)
+    system.load_state_dict(conf['state_dict'], strict=False)
 
     return system.model

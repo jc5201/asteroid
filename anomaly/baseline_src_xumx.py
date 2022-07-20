@@ -28,17 +28,17 @@ import logging
 # from import
 from tqdm import tqdm
 from sklearn import metrics
-from keras.models import Model
-from keras.layers import Input, Dense
 
 
 import torch
 import torch.nn as nn
 from asteroid.models import XUMXControl
-import fast_bss_eval
 import museval
 
 import numpy as np
+
+from utils import *
+from model import TorchModel
 ########################################################################
 
 
@@ -50,94 +50,12 @@ __versions__ = "1.0.3"
 
 
 ########################################################################
-# setup STD I/O
-########################################################################
-"""
-Standard output is logged in "baseline.log".
-"""
-logging.basicConfig(level=logging.DEBUG, filename="baseline.log")
-logger = logging.getLogger(' ')
-handler = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-########################################################################
 # choose machine type and id
 S1 = 'id_00'
 S2 = 'id_02'
 MACHINE = 'valve'
 FILE = 'valve2_conv2.pth'
 
-########################################################################
-# file I/O
-########################################################################
-# pickle I/O
-def save_pickle(filename, save_data):
-    """
-    picklenize the data.
-    filename : str
-        pickle filename
-    data : free datatype
-        some data will be picklenized
-    return : None
-    """
-    logger.info("save_pickle -> {}".format(filename))
-    with open(filename, 'wb') as sf:
-        pickle.dump(save_data, sf)
-
-
-def load_pickle(filename):
-    """
-    unpicklenize the data.
-    filename : str
-        pickle filename
-    return : data
-    """
-    logger.info("load_pickle <- {}".format(filename))
-    with open(filename, 'rb') as lf:
-        load_data = pickle.load(lf)
-    return load_data
-
-
-# wav file Input
-def file_load(wav_name, mono=False):
-    """
-    load .wav file.
-    wav_name : str
-        target .wav file
-    sampling_rate : int
-        audio file sampling_rate
-    mono : boolean
-        When load a multi channels file and this param True, the returned data will be merged for mono data
-    return : numpy.array( float )
-    """
-    try:
-        return librosa.load(wav_name, sr=None, mono=mono)
-    except:
-        logger.error("file_broken or not exists!! : {}".format(wav_name))
-
-
-def demux_wav(wav_name, channel=1):
-    """
-    demux .wav file.
-    wav_name : str
-        target .wav file
-    channel : int
-        target channel number
-    return : numpy.array( float )
-        demuxed mono data
-    Enabled to read multiple sampling rates.
-    Enabled even one channel.
-    """
-    try:
-        multi_channel_data, sr = file_load(wav_name)
-        if multi_channel_data.ndim <= 1:
-            return sr, multi_channel_data
-
-        return sr, numpy.array(multi_channel_data)[:channel, :]
-
-    except ValueError as msg:
-        logger.warning(f'{msg}')
 
 
 ########################################################################
@@ -147,57 +65,51 @@ def demux_wav(wav_name, channel=1):
 # feature extractor
 ########################################################################
 
-def file_to_wav(file_name):
-    sr, y = demux_wav(file_name, channel=2)
-    return sr, y
 
-def wav_to_vector_array(sr, y,
-                         n_mels=64,
-                         frames=5,
-                         n_fft=1024,
-                         hop_length=512,
-                         power=2.0):
-    """
-    convert file_name to a vector array.
-    file_name : str
-        target .wav file
-    return : numpy.array( numpy.array( float ) )
-        vector array
-        * dataset.shape = (dataset_size, fearture_vector_length)
-    """
-    # 01 calculate the number of dimensions
-    dims = n_mels * frames
+def generate_label(y):
+    rms_fig = librosa.feature.rms(y)
+    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
+    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
 
-    # 02 generate melspectrogram using librosa (**kwargs == param["librosa"])
-    mel_spectrogram = librosa.feature.melspectrogram(y=y,
-                                                     sr=sr,
-                                                     n_fft=n_fft,
-                                                     hop_length=hop_length,
-                                                     n_mels=n_mels,
-                                                     power=power)
+    if MACHINE == 'valve':
+        k = int(y.shape[1]*0.8)
+        min_threshold, _ = torch.kthvalue(rms_trim, k)
+    else:
+        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
+    label = (rms_trim > min_threshold).type(torch.float)
+    label = label.expand(y.shape[0], -1)
+    return label
 
-    # 03 convert melspectrogram to log mel energy
-    log_mel_spectrogram = 20.0 / power * numpy.log10(mel_spectrogram + sys.float_info.epsilon)
+def train_file_to_mixture_wav_label(filename):
+    machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
+    ys = 0
+    active_label_sources = {}
+    for machine in machine_types:
+        src_filename = filename.replace(machine_type, machine)
+        sr, y = file_to_wav_stereo(src_filename)
+        active_label_sources[machine] = generate_label(y)
+        ys = ys + y
 
-    # 04 calculate total vector size
-    vectorarray_size = len(log_mel_spectrogram[0, :]) - frames + 1
-
-    # 05 skip too short clips
-    if vectorarray_size < 1:
-        return numpy.empty((0, frames, n_mels), float)
-
-    # 06 generate feature vectors by concatenating multi_frames
-    vectorarray = numpy.zeros((vectorarray_size, frames, n_mels), float)
-    for t in range(frames):
-        vectorarray[:, t, :] = log_mel_spectrogram[:, t: t + vectorarray_size].T
-
-    return vectorarray
+    return sr, ys, active_label_sources
 
 
-def bandwidth_to_max_bin(rate, n_fft, bandwidth):
-    freqs = numpy.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
+def eval_file_to_mixture_wav_label(filename):
+    machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
+    ys = 0
+    gt_wav = {}
+    active_label_sources = {}
+    for normal_type in machine_types:
+        if normal_type == machine_type:
+            src_filename = filename
+        else:
+            src_filename = filename.replace(machine_type, normal_type).replace('abnormal', 'normal')
+        sr, y = file_to_wav_stereo(src_filename)
+        ys = ys + y
+        active_label_sources[normal_type] = generate_label(y)
+        gt_wav[normal_type] = y
+    
+    return sr, ys, gt_wav, active_label_sources
 
-    return numpy.max(numpy.where(freqs <= bandwidth)[0]) + 1
 
 
 class XUMXSystem(torch.nn.Module):
@@ -238,13 +150,14 @@ machine_types = [S1, S2]
 num_eval_normal = 250
 
 
-def train_list_to_vector_array(file_list,
+def train_list_to_mix_sep_spec_vector_array(file_list,
                          msg="calc...",
                          n_mels=64,
                          frames=5,
                          n_fft=1024,
                          hop_length=512,
                          power=2.0,
+                         sep_model=None,
                          target_source=None):
     """
     convert the file_list to a vector array.
@@ -263,30 +176,20 @@ def train_list_to_vector_array(file_list,
 
     # 02 loop of file_to_vectorarray
     for idx in tqdm(range(len(file_list)), desc=msg):
-        active_label_sources = {}
-        mixture_y = 0
         target_type = os.path.split(os.path.split(os.path.split(file_list[idx])[0])[0])[1]
+
+        sr, mixture_y, active_label_sources = train_file_to_mixture_wav_label(file_list[idx])
+            
+        active_labels = torch.stack([active_label_sources[src] for src in machine_types])
+        _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
+        # [src, b, ch, time]
         if target_source is not None:
             target_idx = machine_types.index(target_source)
         else:
             target_idx = machine_types.index(target_type)
-        for machine in machine_types:
-            filename = file_list[idx].replace(target_type, machine)
-            sr, y = file_to_wav(filename)
-            ##############################################################
-            #generate control signal 
-            label = generate_label(y)
-            active_label_sources[machine] = label
-            ##############################################################
-            mixture_y = mixture_y + y
-            
-        active_labels = torch.stack([active_label_sources[src] for src in machine_types])
-        _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
-        
-        # [src, b, ch, time]
         ys = time[target_idx, 0, 0, :].detach().cpu().numpy()
         
-        vector_array = wav_to_vector_array(sr, ys,
+        vector_array = wav_to_spec_vector_array(sr, ys,
                                             n_mels=n_mels,
                                             frames=frames,
                                             n_fft=n_fft,
@@ -294,11 +197,12 @@ def train_list_to_vector_array(file_list,
                                             power=power)
 
         if idx == 0:
-            dataset = numpy.zeros((vector_array.shape[0] * len(file_list), frames, n_mels), float)
+            dataset = numpy.zeros((vector_array.shape[0] * len(file_list), dims), float)
 
-        dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :, :] = vector_array
+        dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :] = vector_array
 
     return dataset
+
 
 class AEDataset(torch.utils.data.Dataset):
     def __init__(self, 
@@ -311,7 +215,7 @@ class AEDataset(torch.utils.data.Dataset):
         self.file_list = file_list
         self.target_source = target_source
 
-        self.data_vector = train_list_to_vector_array(self.file_list,
+        self.data_vector = train_list_to_mix_sep_spec_vector_array(self.file_list,
                                             msg="generate train_dataset",
                                             n_mels=param["feature"]["n_mels"],
                                             frames=param["feature"]["frames"],
@@ -376,6 +280,7 @@ def dataset_generator(target_dir,
     if len(normal_files) == 0:
         logger.exception("no_wav_data!!")
 
+
     # 02 abnormal list generate
     abnormal_files = sorted(glob.glob(
         os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir,
@@ -404,83 +309,6 @@ def dataset_generator(target_dir,
 ########################################################################
 
 
-########################################################################
-# keras model
-########################################################################
-def keras_model(inputDim):
-    """
-    define the keras model
-    the model based on the simple dense auto encoder (64*64*8*64*64)
-    """
-    inputLayer = Input(shape=(inputDim,))
-    h = Dense(64, activation="relu")(inputLayer)
-    h = Dense(64, activation="relu")(h)
-    h = Dense(8, activation="relu")(h)
-    h = Dense(64, activation="relu")(h)
-    h = Dense(64, activation="relu")(h)
-    h = Dense(inputDim, activation=None)(h)
-
-    return Model(inputs=inputLayer, outputs=h)
-
-class TorchModel(nn.Module):
-    def __init__(self, dim_input):
-        super(TorchModel,self).__init__()
-        self.ff = nn.Sequential(
-            nn.Linear(dim_input, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, 8),
-            nn.ReLU(),
-            nn.Linear(8, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, dim_input),
-        )
-
-    def forward(self, x):
-        x = self.ff(x)
-        return x
-
-class TorchConvModel(nn.Module):
-    def __init__(self):
-        super(TorchConvModel,self).__init__()
-        self.ff = nn.Sequential(
-            nn.Conv2d(1, 4, kernel_size=5),
-            nn.ReLU(),
-            nn.Conv2d(4, 32, kernel_size=3),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=3),
-            nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, kernel_size=3),
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, 4, kernel_size=3),
-            nn.ReLU(),
-            nn.ConvTranspose2d(4, 1, kernel_size=5),
-        )
-
-    def forward(self, x):
-        assert len(x.shape) == 3
-        #[B, T, F]
-        x = self.ff(x.unsqueeze(1)).squeeze(1)
-        return x
-
-def generate_label(y):
-    rms_fig = librosa.feature.rms(y)
-    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
-
-    if MACHINE == 'valve':
-        k = int(y.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim, k)
-    else:
-        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
-    label = (rms_trim > min_threshold).type(torch.float)
-    label = label.expand(y.shape[0], -1)
-    return label
-########################################################################
-
 
 ########################################################################
 # main
@@ -498,7 +326,7 @@ if __name__ == "__main__":
 
 
     # load base_directory list
-    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/{machine}/{source}".format(base=param["base_directory"], machine = MACHINE, source = S1))))  
+    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
     # setup the result
     result_file = "{result}/{file_name}".format(result=param["result_directory"], file_name=param["result_file"])
     results = {}
@@ -508,10 +336,11 @@ if __name__ == "__main__":
         print("\n===========================")
         print("[{num}/{total}] {dirname}".format(dirname=target_dir, num=dir_idx + 1, total=len(dirs)))
         print(target_dir)
+
         # dataset param        
         db = os.path.split(os.path.split(os.path.split(target_dir)[0])[0])[1]
         machine_type = 'mix'
-        machine_id = os.path.split(target_dir)[1]  ##TODO: machine id 고치기
+        machine_id = os.path.split(target_dir)[1] 
         # target_dir = target_dir.replace('fan', '*')
 
         # setup path
@@ -541,9 +370,8 @@ if __name__ == "__main__":
                                                                           machine_id=machine_id,
                                                                           db=db)
    
-
-        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_vavle4/checkpoints/epoch=985-step=44369.ckpt'
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
+        
+        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_vavle4/checkpoints/epoch=985-step=44369.ckpt'
 
         ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
         os.makedirs(ae_path, exist_ok= True)
@@ -555,15 +383,15 @@ if __name__ == "__main__":
 
         # dataset generator
         print("============== DATASET_GENERATOR ==============")
-        # if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
-        #     train_files, train_labels = load_pickle(train_pickle)
-        #     eval_files = load_pickle(eval_files_pickle)
-        #     eval_labels = load_pickle(eval_labels_pickle)
-        # else:
-        train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
-        save_pickle(train_pickle, (train_files, train_labels))
-        save_pickle(eval_files_pickle, eval_files)
-        save_pickle(eval_labels_pickle, eval_labels)
+        if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
+            train_files, train_labels = load_pickle(train_pickle)
+            eval_files = load_pickle(eval_files_pickle)
+            eval_labels = load_pickle(eval_labels_pickle)
+        else:
+            train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
+            save_pickle(train_pickle, (train_files, train_labels))
+            save_pickle(eval_files_pickle, eval_files)
+            save_pickle(eval_labels_pickle, eval_labels)
         
         model = {}
         for target_type in machine_types:
@@ -578,8 +406,7 @@ if __name__ == "__main__":
             # model training
             print("============== MODEL TRAINING ==============")
             dim_input = train_dataset.data_vector.shape[1]
-            model[target_type] = TorchConvModel().cuda()
-            #model[target_type] = TorchModel(dim_input).cuda()
+            model[target_type] = TorchModel(dim_input).cuda()
             optimizer = torch.optim.Adam(model[target_type].parameters(), lr=1.0e-4)
             loss_fn = nn.MSELoss()
 
@@ -611,31 +438,15 @@ if __name__ == "__main__":
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
             machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
             target_idx = machine_types.index(machine_type)  
-            y_raw = {}
-            mixture_y = 0
-            active_label_sources = {}
-            for normal_type in machine_types:
-                if normal_type == machine_type:
-                    continue
-                normal_file_name = file_name.replace(machine_type, normal_type).replace('abnormal', 'normal')
-                sr, y = file_to_wav(normal_file_name)
-                label = generate_label(y)
-                active_label_sources[normal_type] = label
-                mixture_y += y 
-                y_raw[normal_type] = y
-
-            sr, y = file_to_wav(file_name)
-            label = generate_label(y)
-            active_label_sources[machine_type] = label 
-            mixture_y += y
-            y_raw[machine_type] = y
-
+            
+            sr, mixture_y, y_raw, active_label_sources = eval_file_to_mixture_wav_label(file_name)
+            
             active_labels = torch.stack([active_label_sources[src] for src in machine_types])
             _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
             # [src, b, ch, time]
             ys = time[target_idx, 0, 0, :].detach().cpu().numpy()
             
-            data = wav_to_vector_array(sr, ys,
+            data = wav_to_spec_vector_array(sr, ys,
                                         n_mels=param["feature"]["n_mels"],
                                         frames=param["feature"]["frames"],
                                         n_fft=param["feature"]["n_fft"],
