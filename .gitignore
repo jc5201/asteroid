@@ -12,6 +12,10 @@ egs/mimii_single/X-UMX/output*
 
 egs/**/wandb
 
+anomaly/model/**
+anomaly/pickle/**
+anomaly/result/**
+
 .vscode*
 
 # Byte-compiled / optimized / DLL files
