@@ -168,32 +168,20 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
                 start_point = 0
             else:
                 start_point = audio_len - mask_len
-            torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.01, max=0.01)
+            # torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.01, max=0.01)
             audio_sources[source] = audio  
             #[channel, time]
             
             if self.use_control:
-                rms_fig = librosa.feature.rms(np.transpose(np_audio)) #[1, 313]
-                rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-                # [channel, time, 1]
-                rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+                mfcc = transforms.MFCC(log_mels=True, melkwargs={"n_mels":64})
+                features = mfcc(audio)[0, :8, :]
+                features = features.unsqueeze(2).expand(-1, -1, 200).reshape(8, -1)[:, :160000]
                 # [channel, time]
 
-                if self.normal:
-                    k = int(audio.shape[1]*0.8)
-                    min_threshold, _ = torch.kthvalue(rms_trim, k)
+                label = features
+                # label = label.expand(audio.shape[0], -1)
+                active_label_sources[source] = label
 
-                    label = (rms_trim > min_threshold).type(torch.float) 
-                    # label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
-                    label = label.expand(audio.shape[0], -1)
-                    active_label_sources[source] = label
-                    #[channel, time]
-
-                else:
-                    label = random.choices([0,1], k=10)
-                    label = label.expand(audio.shape[1])
-                    label = label.expand(audio.shape[0], -1)
-                    active_label_sources[source] = label
 
         # apply linear mix over source index=0
         # make mixture for i-th channel and use 0-th chnnel as gt
@@ -213,8 +201,8 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         if self.use_control:
             active_labels = torch.stack([active_label_sources[src] for src in targets])
             # [source, channel, time]
-            if targets:
-                active_labels = active_labels[:, 0:2, :]
+            # if targets:
+            #     active_labels = active_labels[:, 0:2, :]
             return audio_mix, audio_sources, active_labels
 
         return audio_mix, audio_sources
@@ -226,7 +214,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         """Loads input and output tracks"""
         p = Path(self.root, self.split)
         pp = []
-        pp.extend(p.glob(f'valve/id_04/{"normal" if self.normal else "abnormal"}/*.wav'))
+        pp.extend(p.glob(f'valve/id_00/{"normal" if self.normal else "abnormal"}/*.wav'))
         
         for track_path in tqdm.tqdm(pp):
             # print(track_path)

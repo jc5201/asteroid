@@ -63,10 +63,10 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 ########################################################################
 # choose machine type and id
-S1 = 'id_04'
-S2 = 'id_06'
-MACHINE = 'slider'
-FILE = 'test1.pth'
+S1 = 'id_00'
+S2 = 'id_02'
+MACHINE = 'valve'
+FILE = 'valve2_conv2.pth'
 
 ########################################################################
 # file I/O
@@ -184,12 +184,12 @@ def wav_to_vector_array(sr, y,
 
     # 05 skip too short clips
     if vectorarray_size < 1:
-        return numpy.empty((0, dims), float)
+        return numpy.empty((0, frames, n_mels), float)
 
     # 06 generate feature vectors by concatenating multi_frames
-    vectorarray = numpy.zeros((vectorarray_size, dims), float)
+    vectorarray = numpy.zeros((vectorarray_size, frames, n_mels), float)
     for t in range(frames):
-        vectorarray[:, n_mels * t: n_mels * (t + 1)] = log_mel_spectrogram[:, t: t + vectorarray_size].T
+        vectorarray[:, t, :] = log_mel_spectrogram[:, t: t + vectorarray_size].T
 
     return vectorarray
 
@@ -294,9 +294,9 @@ def train_list_to_vector_array(file_list,
                                             power=power)
 
         if idx == 0:
-            dataset = numpy.zeros((vector_array.shape[0] * len(file_list), dims), float)
+            dataset = numpy.zeros((vector_array.shape[0] * len(file_list), frames, n_mels), float)
 
-        dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :] = vector_array
+        dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :, :] = vector_array
 
     return dataset
 
@@ -443,6 +443,28 @@ class TorchModel(nn.Module):
         x = self.ff(x)
         return x
 
+class TorchConvModel(nn.Module):
+    def __init__(self):
+        super(TorchConvModel,self).__init__()
+        self.ff = nn.Sequential(
+            nn.Conv2d(1, 4, kernel_size=5),
+            nn.ReLU(),
+            nn.Conv2d(4, 32, kernel_size=3),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3),
+            nn.ReLU(),
+            nn.ConvTranspose2d(64, 32, kernel_size=3),
+            nn.ReLU(),
+            nn.ConvTranspose2d(32, 4, kernel_size=3),
+            nn.ReLU(),
+            nn.ConvTranspose2d(4, 1, kernel_size=5),
+        )
+
+    def forward(self, x):
+        assert len(x.shape) == 3
+        #[B, T, F]
+        x = self.ff(x.unsqueeze(1)).squeeze(1)
+        return x
 
 def generate_label(y):
     rms_fig = librosa.feature.rms(y)
@@ -520,7 +542,8 @@ if __name__ == "__main__":
                                                                           db=db)
    
 
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_slider_id46_test2/checkpoints/epoch=965-step=32843.ckpt'
+        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_vavle4/checkpoints/epoch=985-step=44369.ckpt'
+        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
 
         ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
         os.makedirs(ae_path, exist_ok= True)
@@ -555,7 +578,8 @@ if __name__ == "__main__":
             # model training
             print("============== MODEL TRAINING ==============")
             dim_input = train_dataset.data_vector.shape[1]
-            model[target_type] = TorchModel(dim_input).cuda()
+            model[target_type] = TorchConvModel().cuda()
+            #model[target_type] = TorchModel(dim_input).cuda()
             optimizer = torch.optim.Adam(model[target_type].parameters(), lr=1.0e-4)
             loss_fn = nn.MSELoss()
 

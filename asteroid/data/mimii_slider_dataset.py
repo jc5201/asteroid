@@ -173,25 +173,15 @@ class MIMIISliderDataset(torch.utils.data.Dataset):
             #[channel, time]
             
             if self.use_control:
-                rms_fig = librosa.feature.rms(np.transpose(np_audio)) #[1, 313]
-                rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-                # [channel, time, 1]
-                rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+                mfcc = transforms.MFCC(log_mels=True, melkwargs={"n_mels":64})
+                n_mfcc = 8
+                features = mfcc(audio)[0, :n_mfcc, :]
+                features = features.unsqueeze(2).expand(-1, -1, 200).reshape(n_mfcc, -1)[:, :160000]
                 # [channel, time]
 
-                if self.normal:
-                    min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
-                    label = (rms_trim > min_threshold).type(torch.float) 
-                    # label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
-                    label = label.expand(audio.shape[0], -1)
-                    active_label_sources[source] = label
-                    #[channel, time]
-
-                else:
-                    label = random.choices([0,1], k=10)
-                    label = label.expand(audio.shape[1])
-                    label = label.expand(audio.shape[0], -1)
-                    active_label_sources[source] = label
+                label = features
+                # label = label.expand(audio.shape[0], -1)
+                active_label_sources[source] = label
 
         # apply linear mix over source index=0
         # make mixture for i-th channel and use 0-th chnnel as gt
@@ -211,8 +201,6 @@ class MIMIISliderDataset(torch.utils.data.Dataset):
         if self.use_control:
             active_labels = torch.stack([active_label_sources[src] for src in targets])
             # [source, channel, time]
-            if targets:
-                active_labels = active_labels[:, 0:2, :]
             return audio_mix, audio_sources, active_labels
 
         return audio_mix, audio_sources

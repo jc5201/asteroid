@@ -1,4 +1,5 @@
 from pathlib import Path
+from tkinter import N
 import torch.utils.data
 import random
 import torch
@@ -9,6 +10,8 @@ from torchaudio import transforms
 import librosa
 from itertools import product
 import numpy as np
+from pydub import AudioSegment, effects 
+import os 
 
 class ConveyerDataset(torch.utils.data.Dataset):
    
@@ -94,9 +97,19 @@ class ConveyerDataset(torch.utils.data.Dataset):
                 # set to None for reading complete file
                 stop_sample = None
 
-            # load actual audio
+            # load actual audio and normalize
+            file_path = Path(self.tracks[track_id]["source_paths"][i])
+            dir_path = '/hdd/hdd1/sss/conveyor_data/normalize/{source_name}/normal'.format(source_name = source)
+            file_name = os.path.join(dir_path, str(file_path).split("/")[-1])
+            if not os.path.exists(file_name):
+                rawsound = AudioSegment.from_wav(file_path)
+                normalizedsound = effects.normalize(rawsound)
+                os.makedirs(dir_path, exist_ok= True)
+                file_name = os.path.join(dir_path, str(file_path).split("/")[-1])
+                normalizedsound.export(file_name, format="WAV")
+
             np_audio, _ = sf.read(
-                Path(self.tracks[track_id]["source_paths"][i]),
+                file_name,
                 always_2d=True,
                 start=start_sample,
                 stop=stop_sample,
@@ -106,40 +119,30 @@ class ConveyerDataset(torch.utils.data.Dataset):
             # apply source-wise augmentations
             audio = self.source_augmentations(audio)
 
+            # downsample
+            transform = transforms.Resample(96000, 16000)
+            audio = transform(audio)
+
             #apply mask
             audio_len = audio.shape[1]
-            mask_len = random.randrange(int(audio_len * 0.8))
-            if i == 0:
-                start_point = 0
-            else:
-                start_point = audio_len - mask_len
-            torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.01, max=0.01)
+            # mask_len = random.randrange(int(audio_len * 0.8))
+            # if i == 0:
+            #     start_point = 0
+            # else:
+            #     start_point = audio_len - mask_len
+            # torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.01, max=0.01)
             audio_sources[source] = audio  
-            #[channel, time]
+            # [channel, time]
             
             if self.use_control:
-                rms_fig = librosa.feature.rms(np.transpose(np_audio)) #[1, 313]
-                rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-                # [channel, time, 1]
-                rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+                mfcc = transforms.MFCC(log_mels=True, melkwargs={"n_mels":64})
+                features = mfcc(audio)[0, :8, :]
+                features = features.unsqueeze(2).expand(-1, -1, 200).reshape(8, -1)[:, :960000]
                 # [channel, time]
 
-                if self.normal:
-                    k = int(audio.shape[1]*0.8)
-                    min_threshold, _ = torch.kthvalue(rms_trim, k)
-
-                    label = (rms_trim > min_threshold).type(torch.float) 
-                    # label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
-                    label = label.expand(audio.shape[0], -1)
-                    active_label_sources[source] = label
-                    #[channel, time]
-
-                else:
-                    label = random.choices([0,1], k=10)
-                    label = label.expand(audio.shape[1])
-                    label = label.expand(audio.shape[0], -1)
-                    active_label_sources[source] = label
-            
+                label = features
+                # label = label.expand(audio.shape[0], -1)
+                active_label_sources[source] = label
 
         # apply linear mix over source index=0
         # make mixture for i-th channel and use 0-th chnnel as gt
@@ -159,8 +162,8 @@ class ConveyerDataset(torch.utils.data.Dataset):
         if self.use_control:
             active_labels = torch.stack([active_label_sources[src] for src in targets])
             # [source, channel, time]
-            if targets:
-                active_labels = active_labels[:, 0:2, :]
+            # if targets:
+            #     active_labels = active_labels[:, 0:2, :]
             return audio_mix, audio_sources, active_labels
 
         return audio_mix, audio_sources
@@ -173,14 +176,12 @@ class ConveyerDataset(torch.utils.data.Dataset):
         p = Path(self.root)
         pp = []
         pp.extend(p.glob(f'close/{"normal" if self.normal else "abnormal"}/*.WAV'))
-        print("=============================================")
         for track_path in tqdm.tqdm(pp):
             if self.subset and track_path.stem not in self.subset:
                 # skip this track
                 continue
            
             source_paths = [Path(str(track_path).replace(self.sources[0], s)) for s in self.sources]
-            print(source_paths)
             if not all(sp.exists() for sp in source_paths):
                 print("Exclude track due to non-existing source", track_path)
                 continue

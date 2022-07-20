@@ -1,4 +1,4 @@
-from asteroid.data import MIMIIDataset, MIMIIValveDataset, MIMIISliderDataset, ConveyerDataset
+from asteroid.data import MIMIISingleDataset, ConveyerDataset
 import torch
 from pathlib import Path
 import numpy as np
@@ -6,12 +6,7 @@ import random
 
 train_tracks = [f"{n:0>3}" for n in range(10, 350)]
 
-validation_tracks = [
-    "Track002",
-    "Track003",
-    "Track004",
-    "Track005",
-]
+
 
 
 def load_datasets(parser, args):
@@ -30,8 +25,15 @@ def load_datasets(parser, args):
     source_augmentations = Compose(
         [globals()["_augment_" + aug] for aug in args.source_augmentations]
     )
-  
-    train_dataset = ConveyerDataset(
+
+    if args.machine_type == 'conveyer':
+        Dataset = ConveyerDataset
+        validation_tracks = ["Track002", "Track003", "Track004", "Track005"]
+    else:
+        Dataset = MIMIISingleDataset
+        validation_tracks = validation_tracks = ["00000000", "00000001","00000002", "00000003"]
+
+    train_dataset = Dataset(
         split=args.split,
         sources=args.sources,
         targets=args.sources,
@@ -44,27 +46,32 @@ def load_datasets(parser, args):
         use_control=args.use_control,
         task_random= args.task_random,
         source_random = args.source_random,
+        machine = args.machine_type,
+        control_type = args.control_type,
         **dataset_kwargs,
     )
-    train_dataset = filtering_out_valid(train_dataset)
+    train_dataset = filtering_out_valid(train_dataset, validation_tracks)
 
-    valid_dataset = ConveyerDataset(
+    valid_dataset = Dataset(
         split=args.split,
         subset=validation_tracks,
         sources=args.sources,
         targets=args.sources,
+        source_augmentations=source_augmentations,
         segment=args.val_dur,
         sample_rate=args.sample_rate,
         use_control=args.use_control,
         task_random= args.task_random,
         source_random = args.source_random,
+        machine = args.machine_type,
+        control_type = args.control_type,
         **dataset_kwargs,
     )
 
     return train_dataset, valid_dataset
 
 
-def filtering_out_valid(input_dataset):
+def filtering_out_valid(input_dataset, validation_tracks):
     """Filtering out validation tracks from input dataset.
 
     Return:
