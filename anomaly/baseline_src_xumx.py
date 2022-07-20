@@ -1,11 +1,5 @@
 #!/usr/bin/env python
-"""
- @file   baseline.py
- @brief  Baseline code of simple AE-based anomaly detection used experiment in [1].
- @author Ryo Tanabe and Yohei Kawaguchi (Hitachi Ltd.)
- Copyright (C) 2019 Hitachi, Ltd. All right reserved.
- [1] Harsh Purohit, Ryo Tanabe, Kenji Ichige, Takashi Endo, Yuki Nikaido, Kaori Suefusa, and Yohei Kawaguchi, "MIMII Dataset: Sound Dataset for Malfunctioning Industrial Machine Investigation and Inspection," arXiv preprint arXiv:1909.09347, 2019.
-"""
+
 ########################################################################
 # import default python-library
 ########################################################################
@@ -13,19 +7,15 @@ import pickle
 import os
 import sys
 import glob
-########################################################################
 
-
-########################################################################
-# import additional python-library
-########################################################################
 import numpy
+import numpy as np
 import librosa
 import librosa.core
 import librosa.feature
 import yaml
 import logging
-# from import
+
 from tqdm import tqdm
 from sklearn import metrics
 
@@ -35,7 +25,6 @@ import torch.nn as nn
 from asteroid.models import XUMXControl
 import museval
 
-import numpy as np
 
 from utils import *
 from model import TorchModel

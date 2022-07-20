@@ -8,10 +8,19 @@
 
 ## How to run the code
 
-### baseline code
+### anomaly detection
+
+Before runninng the code, check the configurations in baseline.yaml and values (including pretrained model path) in .py files.
 
 ```
 python baseline.py
 ```
 
+```
+python baseline_src_xumx.py
+```
+
+### About grad-cam and clustering
+
+Check the `grad_cam.ipynb` and `anomaly_classification_shared.ipynb`.
 

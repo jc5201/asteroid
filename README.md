@@ -25,7 +25,7 @@ pip install -r requirements.txt
 
 # Run the code
 To run X-UMX change the configuration file considering the type of data and the use of control signal.
-## First change the configuration 
+## 1. First change the configuration 
 ```bash
 cd egs/mimii/X-UMX/local
 . ./conf.yml
@@ -53,10 +53,12 @@ data:
   use_control: True
   control_type: mfcc
 ```
+Use `XUMXControlMFCC` model instead of `XUMXControl` model.
+
 ### to run the model without control signal 
 everything is same with "without control setting", but set the use_control as False.
 
-## Second train the model by running
+## 2. train the model by running
 ```bash
 cd egs/mimii/X-UMX
 train.py or train_cont.py
