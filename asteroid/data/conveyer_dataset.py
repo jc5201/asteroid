@@ -34,7 +34,8 @@ class ConveyerDataset(torch.utils.data.Dataset):
         normal=True,
         use_control=False,
         task_random = False,
-        source_random = False
+        machine_type = None,
+        control_type = 'mfcc',
     ):
 
         self.root = Path(root).expanduser()
@@ -50,26 +51,19 @@ class ConveyerDataset(torch.utils.data.Dataset):
         self.subset = subset
         self.samples_per_track = samples_per_track
         self.normal = normal
+        self.machine_type = machine_type
+        self.control_type = control_type
         self.tracks = list(self.get_tracks())
-        #print(self.tracks)
         if not self.tracks:
             raise RuntimeError("No tracks found.")
         self.use_control = use_control 
-        self.normal = True
         self.task_random = task_random
-        self.source_random = source_random
+
 
     def __getitem__(self, index):
        
         audio_sources = {}
         active_label_sources = {}
-
-        if self.source_random:
-            sources_tmp = random.sample(self.sources, 2)
-            target_tmp = sources_tmp
-        else:
-            sources_tmp = self.sources
-            target_tmp = self.targets
 
         # get track_id
         track_id = index // self.samples_per_track
@@ -79,7 +73,7 @@ class ConveyerDataset(torch.utils.data.Dataset):
             start = 0
 
         # load sources
-        for i, source in enumerate(sources_tmp):
+        for i, source in enumerate(self.sources):
             # optionally select a random track for each source
             if self.random_track_mix:
                 # load a different track
@@ -125,12 +119,12 @@ class ConveyerDataset(torch.utils.data.Dataset):
 
             #apply mask
             audio_len = audio.shape[1]
-            # mask_len = random.randrange(int(audio_len * 0.8))
-            # if i == 0:
-            #     start_point = 0
-            # else:
-            #     start_point = audio_len - mask_len
-            # torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.01, max=0.01)
+            mask_len = random.randrange(int(audio_len * 0.8))
+            if i == 0:
+                start_point = 0
+            else:
+                start_point = audio_len - mask_len
+            torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.01, max=0.01)
             audio_sources[source] = audio  
             # [channel, time]
             
@@ -139,31 +133,26 @@ class ConveyerDataset(torch.utils.data.Dataset):
                 features = mfcc(audio)[0, :8, :]
                 features = features.unsqueeze(2).expand(-1, -1, 200).reshape(8, -1)[:, :960000]
                 # [channel, time]
-
                 label = features
-                # label = label.expand(audio.shape[0], -1)
                 active_label_sources[source] = label
 
-        # apply linear mix over source index=0
-        # make mixture for i-th channel and use 0-th chnnel as gt
+       
+        # make mixture 
+        target_tmp = self.targets
         if self.task_random:
             targets = target_tmp.copy()
             random.shuffle(targets)       
         else:
             targets = target_tmp
         audioes = torch.stack([audio_sources[src] for src in targets])
-        audio_mix = torch.stack([audioes[i, 0:2, :] for i in range(len(sources_tmp))]).sum(0)
+        audio_mix = torch.stack([audioes[i, 0:2, :] for i in range(len(self.sources))]).sum(0)
 
         #use different channel for two different valves
         if targets:
             audio_sources = audioes[:, 0:2, :]
-            #audio_sources[1, :, :] = audioes[1, 2:4, :]
 
         if self.use_control:
             active_labels = torch.stack([active_label_sources[src] for src in targets])
-            # [source, channel, time]
-            # if targets:
-            #     active_labels = active_labels[:, 0:2, :]
             return audio_mix, audio_sources, active_labels
 
         return audio_mix, audio_sources
@@ -175,7 +164,7 @@ class ConveyerDataset(torch.utils.data.Dataset):
         """Loads input and output tracks"""
         p = Path(self.root)
         pp = []
-        pp.extend(p.glob(f'close/{"normal" if self.normal else "abnormal"}/*.WAV'))
+        pp.extend(p.glob(f'{self.sources[0]}/{"normal" if self.normal else "abnormal"}/*.WAV'))
         for track_path in tqdm.tqdm(pp):
             if self.subset and track_path.stem not in self.subset:
                 # skip this track

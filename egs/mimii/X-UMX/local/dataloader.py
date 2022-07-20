@@ -32,7 +32,7 @@ def load_datasets(parser, args):
     else:
         Dataset = MIMIISingleDataset
         validation_tracks = validation_tracks = ["00000000", "00000001","00000002", "00000003"]
-
+    
     train_dataset = Dataset(
         split=args.split,
         sources=args.sources,
@@ -45,13 +45,13 @@ def load_datasets(parser, args):
         samples_per_track=args.samples_per_track,
         use_control=args.use_control,
         task_random= args.task_random,
-        source_random = args.source_random,
-        machine = args.machine_type,
+        machine_type = args.machine_type,
         control_type = args.control_type,
         **dataset_kwargs,
     )
+    
     train_dataset = filtering_out_valid(train_dataset, validation_tracks)
-
+    
     valid_dataset = Dataset(
         split=args.split,
         subset=validation_tracks,
@@ -62,8 +62,7 @@ def load_datasets(parser, args):
         sample_rate=args.sample_rate,
         use_control=args.use_control,
         task_random= args.task_random,
-        source_random = args.source_random,
-        machine = args.machine_type,
+        machine_type = args.machine_type,
         control_type = args.control_type,
         **dataset_kwargs,
     )
