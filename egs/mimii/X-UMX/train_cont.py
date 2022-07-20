@@ -28,7 +28,7 @@ import wandb
 # In the hierarchical dictionary created when parsing, the key `key` can be
 # found at dic['main_args'][key]
 
-# By default train.py will use all available GPUs.
+# choose gpu
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
 os.environ["CUDA_VISIBLE_DEVICES"]= "3"
 
@@ -315,18 +315,6 @@ def main(conf, args):
         # check_val_every_n_epoch=5,
     )
     trainer.fit(system)
-
-    # best_k = {k: v.item() for k, v in checkpoint.best_k_models.items()}
-    # with open(os.path.join(exp_dir, "best_k_models.json"), "w") as f:
-    #     json.dump(best_k, f, indent=0)
-
-    # state_dict = torch.load(checkpoint.best_model_path)
-    # system.load_state_dict(state_dict=state_dict["state_dict"])
-    # system.cpu()
-
-    # to_save = system.model.serialize()
-    # to_save.update(train_dataset.get_infos())
-    # torch.save(to_save, os.path.join(exp_dir, "best_model.pth"))
 
 
 if __name__ == "__main__":
