@@ -206,8 +206,8 @@ To run X-UMX change the configuration file considering the type of data and the 
 cd egs/mimii/X-UMX/local
 . ./conf.yml
 ```
-### to run the model with control signal 
-### in MIMII dataset:
+#### to run the model with control signal 
+#### in MIMII dataset:
 ```bash
 data:
   train_dir:/mimii
@@ -218,7 +218,7 @@ data:
   use_control: True
   control_type: mfcc or rms
 ```
-### in conveyer dataset:
+#### in conveyer dataset:
 ```bash
 data:
   train_dir:/sss
@@ -229,7 +229,7 @@ data:
   use_control: True
   control_type: mfcc
 ```
-### to run the model without control signal 
+#### to run the model without control signal 
 everything is same with "without control setting", but set the use_control as False.
 
 ## Second train the model by running
