@@ -103,13 +103,13 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         self.subset = subset
         self.samples_per_track = samples_per_track
         self.normal = normal
+        self.source_random = source_random
         self.tracks = list(self.get_tracks())
         if not self.tracks:
             raise RuntimeError("No tracks found.")
         self.use_control = use_control 
         self.normal = True
         self.task_random = task_random
-        self.source_random = source_random
 
     def __getitem__(self, index):
        
@@ -117,7 +117,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         active_label_sources = {}
 
         if self.source_random:
-            sources_tmp = random.sample(self.sources, 2)
+            sources_tmp = ["src1", "src2"]
             target_tmp = sources_tmp
         else:
             sources_tmp = self.sources
@@ -132,8 +132,13 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
 
         # load sources
         for i, source in enumerate(sources_tmp):
+            if self.source_random:
+                src_idx = 0
+            else:
+                src_idx = i
+
             # optionally select a random track for each source
-            if self.random_track_mix:
+            if self.random_track_mix or self.source_random:
                 # load a different track
                 track_id = random.choice(range(len(self.tracks)))
                 if self.random_segments:
@@ -151,7 +156,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
 
             # load actual audio
             np_audio, _ = sf.read(
-                Path(self.tracks[track_id]["source_paths"][i]),
+                Path(self.tracks[track_id]["source_paths"][src_idx]),
                 always_2d=True,
                 start=start_sample,
                 stop=stop_sample,
@@ -161,27 +166,24 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
             # apply source-wise augmentations
             audio = self.source_augmentations(audio)
 
-            #apply mask
-            audio_len = audio.shape[1]
-            mask_len = random.randrange(int(audio_len * 0.8))
-            if i == 0:
-                start_point = 0
-            else:
-                start_point = audio_len - mask_len
-            # torch.clamp_(audio[:, start_point:start_point + mask_len], min=-0.01, max=0.01)
             audio_sources[source] = audio  
             #[channel, time]
             
             if self.use_control:
-                mfcc = transforms.MFCC(log_mels=True, melkwargs={"n_mels":64})
-                features = mfcc(audio)[0, :8, :]
-                features = features.unsqueeze(2).expand(-1, -1, 200).reshape(8, -1)[:, :160000]
+                rms_fig = librosa.feature.rms(y=np.transpose(np_audio)) #[1, 313]
+                rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
+                # [channel, time, 1]
+                rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
                 # [channel, time]
 
-                label = features
-                # label = label.expand(audio.shape[0], -1)
-                active_label_sources[source] = label
+                k = int(audio.shape[1]*0.8)
+                min_threshold, _ = torch.kthvalue(rms_trim, k)
 
+                label = (rms_trim > min_threshold).type(torch.float) 
+                # label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
+                label = label.expand(audio.shape[0], -1)
+                active_label_sources[source] = label
+                #[channel, time]
 
         # apply linear mix over source index=0
         # make mixture for i-th channel and use 0-th chnnel as gt
@@ -214,15 +216,21 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         """Loads input and output tracks"""
         p = Path(self.root, self.split)
         pp = []
-        pp.extend(p.glob(f'valve/id_00/{"normal" if self.normal else "abnormal"}/*.wav'))
+        if self.source_random:
+            for src in self.sources:
+                pp.extend(p.glob(f'valve/{src}/{"normal" if self.normal else "abnormal"}/*.wav'))
+        else:
+            pp.extend(p.glob(f'valve/id_00/{"normal" if self.normal else "abnormal"}/*.wav'))
         
         for track_path in tqdm.tqdm(pp):
-            # print(track_path)
             if self.subset and track_path.stem not in self.subset:
                 # skip this track
                 continue
-           
-            source_paths = [Path(str(track_path).replace(self.sources[0], s)) for s in self.sources]
+            
+            if self.source_random:
+                source_paths = [track_path]
+            else:
+                source_paths = [Path(str(track_path).replace(self.sources[0], s)) for s in self.sources]
             if not all(sp.exists() for sp in source_paths):
                 print("Exclude track due to non-existing source", track_path)
                 continue
