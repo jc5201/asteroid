@@ -238,7 +238,7 @@ def main(conf, args):
         input_mean=scaler_mean,
         input_scale=scaler_std,
         nb_channels=args.nb_channels,
-        nb_control_channels=args.nb_control_channels,
+        # nb_control_channels=args.nb_control_channels,     # for mfcc
         hidden_size=args.hidden_size,
         in_chan=args.in_chan,
         n_hop=args.nhop,

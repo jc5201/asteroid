@@ -203,8 +203,8 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         if self.use_control:
             active_labels = torch.stack([active_label_sources[src] for src in targets])
             # [source, channel, time]
-            # if targets:
-            #     active_labels = active_labels[:, 0:2, :]
+            if targets:
+                active_labels = active_labels[:, 0:2, :]
             return audio_mix, audio_sources, active_labels
 
         return audio_mix, audio_sources

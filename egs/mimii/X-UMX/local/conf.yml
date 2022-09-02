@@ -32,8 +32,9 @@ data:
     - id_00
     - id_02
   use_control: True
-  control_type: mfcc
+  control_type: rms
   task_random: True
+  source_random: True
 # Network config
 model:
   pretrained: null

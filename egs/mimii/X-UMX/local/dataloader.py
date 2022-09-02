@@ -1,4 +1,4 @@
-from asteroid.data import MIMIISingleDataset, ConveyerDataset
+from asteroid.data import MIMIISingleDataset, MIMIIValveDataset
 import torch
 from pathlib import Path
 import numpy as np
@@ -26,12 +26,12 @@ def load_datasets(parser, args):
         [globals()["_augment_" + aug] for aug in args.source_augmentations]
     )
 
-    if args.machine_type == 'conveyer':
-        Dataset = ConveyerDataset
-        validation_tracks = ["Track002", "Track003", "Track004", "Track005"]
-    else:
-        Dataset = MIMIISingleDataset
-        validation_tracks = validation_tracks = ["00000000", "00000001","00000002", "00000003"]
+    # if args.machine_type == 'conveyer':
+    #     Dataset = ConveyerDataset
+    #     validation_tracks = ["Track002", "Track003", "Track004", "Track005"]
+    # else:
+    Dataset = MIMIIValveDataset
+    validation_tracks = validation_tracks = ["00000000", "00000001","00000002", "00000003"]
     
     train_dataset = Dataset(
         split=args.split,
@@ -44,9 +44,10 @@ def load_datasets(parser, args):
         sample_rate=args.sample_rate,
         samples_per_track=args.samples_per_track,
         use_control=args.use_control,
-        task_random= args.task_random,
-        machine_type = args.machine_type,
-        control_type = args.control_type,
+        task_random=args.task_random,
+        source_random=args.source_random,
+        # machine_type = args.machine_type,         # for conveyor
+        # control_type = args.control_type,
         **dataset_kwargs,
     )
     
@@ -61,9 +62,9 @@ def load_datasets(parser, args):
         segment=args.val_dur,
         sample_rate=args.sample_rate,
         use_control=args.use_control,
-        task_random= args.task_random,
-        machine_type = args.machine_type,
-        control_type = args.control_type,
+        source_random=args.source_random,
+        # machine_type = args.machine_type,         # for conveyor
+        # control_type = args.control_type,
         **dataset_kwargs,
     )
 
