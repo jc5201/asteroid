@@ -19,7 +19,7 @@ optim:
 data:
   train_dir: /dev/shm/mimii
   split: 6dB
-  output: /hdd/hdd1/sss/xumx/0908_test
+  output: /hdd/hdd1/sss/xumx/0908_pit_1
   sample_rate: 16000
   num_workers: 4
   seed: 42
@@ -32,7 +32,7 @@ data:
   sources:
     - id_00
     - id_02
-  use_control: True
+  use_control: False
   control_type: rms
   task_random: True
   source_random: False

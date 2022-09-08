@@ -19,7 +19,7 @@ from asteroid.models.x_umx import _STFT, _Spectrogram
 
 from local import dataloader
 from pathlib import Path
-from loss import MultiDomainLoss
+from loss import MultiDomainLoss, CustomPITLossWrapper
 
 from pytorch_lightning.loggers import WandbLogger
 import wandb 
@@ -28,13 +28,9 @@ import wandb
 # In the hierarchical dictionary created when parsing, the key `key` can be
 # found at dic['main_args'][key]
 
-# By default train.py will use all available GPUs.
+
 parser = argparse.ArgumentParser()
-
-
-os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
-os.environ["CUDA_VISIBLE_DEVICES"]= "2" 
-
+parser.add_argument("--conf", action="store", default="local/conf.yml")
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
 
@@ -56,7 +52,10 @@ def get_statistics(args, dataset):
     dataset_scaler.segment = False
     pbar = tqdm.tqdm(range(len(dataset_scaler)))
     for ind in pbar:
-        x, _= dataset_scaler[ind]
+        if args.use_control:
+            x, _, _ = dataset_scaler[ind]
+        else:
+            x, _= dataset_scaler[ind]
         pbar.set_description("Compute dataset statistics")
         X = spec(x[None, ...])[0]
         scaler.partial_fit(np.squeeze(X))
@@ -112,10 +111,11 @@ class XUMXManager(System):
     def common_step(self, batch, batch_nb, train=True, return_est=False):
         inputs, targets = batch
         est_targets = self(inputs)
-        loss = self.loss_func(est_targets, targets, return_est=return_est)
         if return_est:
-            return loss, est_targets
+            loss, perm_est_targets = self.loss_func(est_targets, targets, return_est=return_est)
+            return loss, perm_est_targets
         else:
+            loss = self.loss_func(est_targets, targets)
             return loss
 
     def validation_step(self, batch, batch_nb):
@@ -178,22 +178,142 @@ class XUMXManager(System):
         if self.current_epoch % 10 == 0:
             sdr = sdr_tmp / cnt
             sdri = sdri_tmp / cnt
-
-            for i, src in enumerate(self.model.sources): # ["id_00", "id_02"]
-                audio = np.array(time_hat[i, :, 0].reshape(-1,1).detach().cpu())
-                gt_audio = np.array(targets[i, :, 0].reshape(-1,1).detach().cpu())
-                mixture_audio = np.array(mixture[0, :, 0].reshape(-1,1).detach().cpu())
-
+            for i, src in enumerate(self.model.sources): 
                 self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
                 self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
 
-                if batch_nb % 8 == 0:
-                    self.logger.experiment.log({f"val_audio_{src}": [wandb.Audio(audio, sample_rate = 16000)],
-                    f"gt_audio_{src}": [wandb.Audio(gt_audio, sample_rate = 16000)],
-                    "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)]})
+            if batch_nb % 8 == 0:
+                valve1_hat = np.array(time_hat[0, :, 0].reshape(-1,1).detach().cpu())
+                valve2_hat = np.array(time_hat[1, :, 0].reshape(-1,1).detach().cpu())
+
+                valve1_gt = np.array(targets[0, :, 0].reshape(-1,1).detach().cpu())
+                valve2_gt = np.array(targets[1, :, 0].reshape(-1,1).detach().cpu())
+
+                mixture_audio = np.array(mix_audio[0, :, 0].reshape(-1,1).detach().cpu())
+
+                self.logger.experiment.log({
+                    "val_valve1": [wandb.Audio(valve1_hat, sample_rate = 16000)],
+                    "gt_valve1": [wandb.Audio(valve1_gt, sample_rate = 16000)],
+                    "val_valve2": [wandb.Audio(valve2_hat, sample_rate = 16000)],
+                    "gt_valve2": [wandb.Audio(valve2_gt, sample_rate = 16000)],
+                    "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)],
+                })
                 
             self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
             self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
+
+
+class XUMXControlManager(XUMXManager):
+    def __init__(
+        self,
+        model,
+        optimizer,
+        loss_func,
+        train_loader,
+        val_loader=None,
+        scheduler=None,
+        config=None,
+        val_dur=None,
+    ):
+        super().__init__(model, optimizer, loss_func, train_loader, val_loader, scheduler, config, val_dur)
+
+    def common_step(self, batch, batch_nb, train=True, return_est=False):
+        inputs, targets, labels = batch
+        est_targets = self(inputs, labels)
+        if return_est:
+            loss, perm_est_targets = self.loss_func(est_targets, targets, return_est=return_est)
+            return loss, perm_est_targets
+        else:
+            loss = self.loss_func(est_targets, targets)
+            return loss
+
+    def validation_step(self, batch, batch_nb):
+        """
+        We calculate the ``validation loss'' by splitting each song into
+        smaller chunks in order to prevent GPU out-of-memory errors.
+        The length of each chunk is given by ``self.val_dur_samples'' which is
+        computed from ``sample_rate [Hz]'' and ``val_dur [seconds]'' which are
+        both set in conf.yml.
+        """
+        sp = 0
+        dur_samples = int(self.val_dur_samples)
+        cnt = 0
+        loss_tmp = 0.0
+        sdr_tmp = 0.0
+        sdri_tmp = 0.0
+
+        while 1:
+            input = batch[0][Ellipsis, sp : sp + dur_samples]
+            gt = batch[1][Ellipsis, sp : sp + dur_samples]
+            label = batch[2][Ellipsis, sp : sp + dur_samples]
+            batch_tmp = [
+                input,  # input
+                gt,  # target
+                label,
+            ]
+
+            loss_step, est_step = self.common_step(batch_tmp, batch_nb, train=False, return_est=True)
+            loss_tmp += loss_step
+            cnt += 1
+            sp += dur_samples
+
+            ###
+            if self.current_epoch % 10 == 0:
+                targets = gt
+                mixture = input
+                spec_hat, time_hat = est_step
+
+                
+                n_src, n_batch, n_channel, time_length = time_hat.shape
+                assert n_batch == 1
+                time_hat = time_hat.squeeze(1).permute(0, 2, 1)
+
+                targets = targets[:, :, :, :time_length]
+                targets = targets.squeeze(0).permute(0, 2, 1)
+
+                mixture = mixture[:, :, :time_length]
+                mixture = mixture.permute(0, 2, 1)
+                mix_audio = mixture.clone()
+                mixture = mixture.repeat(n_src, 1, 1)
+
+                sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
+                sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
+
+                sdr_tmp += np.mean(sdr, axis=1)
+                sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
+
+            if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
+                break
+        loss = loss_tmp / cnt
+        self.log("val_loss", loss, on_epoch=True, prog_bar=True)
+        
+        if self.current_epoch % 10 == 0:
+            sdr = sdr_tmp / cnt
+            sdri = sdri_tmp / cnt
+            for i, src in enumerate(self.model.sources): 
+                self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
+                self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
+
+            if batch_nb % 8 == 0:
+                valve1_hat = np.array(time_hat[0, :, 0].reshape(-1,1).detach().cpu())
+                valve2_hat = np.array(time_hat[1, :, 0].reshape(-1,1).detach().cpu())
+
+                valve1_gt = np.array(targets[0, :, 0].reshape(-1,1).detach().cpu())
+                valve2_gt = np.array(targets[1, :, 0].reshape(-1,1).detach().cpu())
+
+                mixture_audio = np.array(mix_audio[0, :, 0].reshape(-1,1).detach().cpu())
+
+                self.logger.experiment.log({
+                    "val_valve1": [wandb.Audio(valve1_hat, sample_rate = 16000)],
+                    "gt_valve1": [wandb.Audio(valve1_gt, sample_rate = 16000)],
+                    "val_valve2": [wandb.Audio(valve2_hat, sample_rate = 16000)],
+                    "gt_valve2": [wandb.Audio(valve2_gt, sample_rate = 16000)],
+                    "mixture": [wandb.Audio(mixture_audio, sample_rate = 16000)],
+                })
+                
+            self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
+            self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
+
 
 
 def main(conf, args):
@@ -224,21 +344,38 @@ def main(conf, args):
 
     max_bin = bandwidth_to_max_bin(train_dataset.sample_rate, args.in_chan, args.bandwidth)
 
-    x_unmix = XUMX(
-        window_length=args.window_length,
-        input_mean=scaler_mean,
-        input_scale=scaler_std,
-        nb_channels=args.nb_channels,
-        hidden_size=args.hidden_size,
-        in_chan=args.in_chan,
-        n_hop=args.nhop,
-        sources=['s1', 's2'], #sources=args.sources,
-        max_bin=max_bin,
-        bidirectional=args.bidirectional,
-        sample_rate=train_dataset.sample_rate,
-        spec_power=args.spec_power,
-        return_time_signals=True,
-    )
+    if args.use_control:
+        x_unmix = XUMXControl(
+            window_length=args.window_length,
+            input_mean=scaler_mean,
+            input_scale=scaler_std,
+            nb_channels=args.nb_channels,
+            hidden_size=args.hidden_size,
+            in_chan=args.in_chan,
+            n_hop=args.nhop,
+            sources=['s1', 's2'],  #sources=args.sources,
+            max_bin=max_bin,
+            bidirectional=args.bidirectional,
+            sample_rate=train_dataset.sample_rate,
+            spec_power=args.spec_power,
+            return_time_signals=True,
+        )
+    else:
+        x_unmix = XUMX(
+            window_length=args.window_length,
+            input_mean=scaler_mean,
+            input_scale=scaler_std,
+            nb_channels=args.nb_channels,
+            hidden_size=args.hidden_size,
+            in_chan=args.in_chan,
+            n_hop=args.nhop,
+            sources=['s1', 's2'], #sources=args.sources,
+            max_bin=max_bin,
+            bidirectional=args.bidirectional,
+            sample_rate=train_dataset.sample_rate,
+            spec_power=args.spec_power,
+            return_time_signals=True,
+        )
 
     optimizer = make_optimizer(
         x_unmix.parameters(), lr=args.lr, optimizer="adam", weight_decay=args.weight_decay
@@ -257,32 +394,59 @@ def main(conf, args):
     es = EarlyStopping(monitor="val_loss", mode="min", patience=args.patience, verbose=True)
 
     # Define Loss function.
-    loss_func = MultiDomainLoss(
-        window_length=args.window_length,
-        in_chan=args.in_chan,
-        n_hop=args.nhop,
-        spec_power=args.spec_power,
-        nb_channels=args.nb_channels,
-        loss_combine_sources=args.loss_combine_sources,
-        loss_use_multidomain=args.loss_use_multidomain,
-        mix_coef=args.mix_coef,
-    )
-    system = XUMXManager(
-        model=x_unmix,
-        loss_func=loss_func,
-        optimizer=optimizer,
-        train_loader=train_sampler,
-        val_loader=valid_sampler,
-        scheduler=scheduler,
-        config=conf,
-        val_dur=args.val_dur,
-    )
+    if args.loss_pit:
+        base_loss_func = MultiDomainLoss(
+            window_length=args.window_length,
+            in_chan=args.in_chan,
+            n_hop=args.nhop,
+            spec_power=args.spec_power,
+            nb_channels=args.nb_channels,
+            loss_combine_sources=args.loss_combine_sources,
+            loss_use_multidomain=args.loss_use_multidomain,
+            mix_coef=args.mix_coef,
+            reduce="",
+        )
+        pit_loss_func = CustomPITLossWrapper(loss_func=base_loss_func, pit_from="perm_avg")
+        loss_func = pit_loss_func
+    else:
+        loss_func = MultiDomainLoss(
+            window_length=args.window_length,
+            in_chan=args.in_chan,
+            n_hop=args.nhop,
+            spec_power=args.spec_power,
+            nb_channels=args.nb_channels,
+            loss_combine_sources=args.loss_combine_sources,
+            loss_use_multidomain=args.loss_use_multidomain,
+            mix_coef=args.mix_coef,
+        )
+    if args.use_control:
+        system = XUMXControlManager(
+            model=x_unmix,
+            loss_func=loss_func,
+            optimizer=optimizer,
+            train_loader=train_sampler,
+            val_loader=valid_sampler,
+            scheduler=scheduler,
+            config=conf,
+            val_dur=args.val_dur,
+        )
+    else:
+        system = XUMXManager(
+            model=x_unmix,
+            loss_func=loss_func,
+            optimizer=optimizer,
+            train_loader=train_sampler,
+            val_loader=valid_sampler,
+            scheduler=scheduler,
+            config=conf,
+            val_dur=args.val_dur,
+        )
 
     # Define callbacks
     callbacks = []
     checkpoint_dir = os.path.join(exp_dir, "checkpoints/")
     checkpoint = ModelCheckpoint(
-        checkpoint_dir, monitor="val_loss", mode="min", verbose=True, save_top_k=1000,
+        checkpoint_dir, monitor="val_loss", mode="min", verbose=True, save_top_k=5,
     )
     callbacks.append(checkpoint)
     callbacks.append(es)
@@ -324,7 +488,8 @@ if __name__ == "__main__":
     # We start with opening the config file conf.yml as a dictionary from
     # which we can create parsers. Each top level key in the dictionary defined
     # by the YAML file creates a group in the parser.
-    with open("local/conf.yml") as f:
+    args = parser.parse_args()          # just for conf name
+    with open(args.conf) as f:
         def_conf = yaml.safe_load(f)
     parser = prepare_parser_from_dict(def_conf, parser=parser)
 
