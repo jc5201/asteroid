@@ -1,12 +1,130 @@
 import itertools
+from itertools import permutations
 import numpy as np
 
 import torch
 
 from asteroid.models.x_umx import _STFT, _Spectrogram
+from asteroid.losses.pit_wrapper import PITLossWrapper
 from asteroid.losses import singlesrc_mse
 from torch.nn.modules.loss import _Loss
 from torch import nn
+
+class CustomPITLossWrapper(PITLossWrapper):
+    def __init__(self, loss_func, pit_from="pw_mtx", perm_reduce=None):
+        super().__init__(loss_func, pit_from=pit_from, perm_reduce=perm_reduce)
+        if self.pit_from not in ["perm_avg"]:
+            raise ValueError(
+                "Unsupported loss function type for now. Expected"
+                "one of [`perm_avg`]."
+                "CustomPITLossWrapper needs to be fixed."
+            )
+    
+    def forward(self, est_targets, targets, return_est=False, reduce_kwargs=None, **kwargs):
+        r"""Find the best permutation and return the loss.
+
+        Args:
+            est_targets: torch.Tensor. Expected shape $(batch, nsrc, ...)$.
+                The batch of target estimates.
+            targets: torch.Tensor. Expected shape $(batch, nsrc, ...)$.
+                The batch of training targets
+            return_est: Boolean. Whether to return the reordered targets
+                estimates (To compute metrics or to save example).
+            reduce_kwargs (dict or None): kwargs that will be passed to the
+                pairwise losses reduce function (`perm_reduce`).
+            **kwargs: additional keyword argument that will be passed to the
+                loss function.
+
+        Returns:
+            - Best permutation loss for each batch sample, average over
+              the batch.
+            - The reordered targets estimates if ``return_est`` is True.
+              :class:`torch.Tensor` of shape $(batch, nsrc, ...)$.
+        """
+        n_src = targets.shape[1]
+        assert n_src < 10, f"Expected source axis along dim 1, found {n_src}"
+        if self.pit_from == "perm_avg":
+            # Cannot get pairwise losses from this type of loss.
+            # Find best permutation directly.
+            min_loss, batch_indices = self.best_perm_from_perm_avg_loss(
+                self.loss_func, est_targets, targets, **kwargs
+            )
+
+            reordered = self.reorder_source(est_targets, batch_indices)
+            loss = self.loss_func(est_targets, targets)
+            mean_loss = torch.mean(loss)
+            if return_est:
+                return mean_loss, reordered
+            else:
+                return mean_loss
+        else:
+            print("Not implemented for CustomPITWrapper")
+            assert False
+
+    @staticmethod
+    def best_perm_from_perm_avg_loss(loss_func, est_targets, targets, **kwargs):
+        r"""Find best permutation from loss function with source axis.
+
+        Args:
+            loss_func: function with signature $(est_targets, targets, **kwargs)$
+                The loss function batch losses from.
+            **kwargs: additional keyword argument that will be passed to the
+                loss function.
+
+        Returns:
+            - :class:`torch.Tensor`:
+                The loss corresponding to the best permutation of size $(batch,)$.
+
+            - :class:`torch.Tensor`:
+                The indices of the best permutations.
+        """
+
+        
+        """est_targets (list) has 2 elements:
+            [0]->Estimated Spec. : (Sources, Frames, Batch size, Channels, Freq. bins)
+            [1]->Estimated Signal: (Sources, Batch size, Channels, Time Length)
+
+        targets: (Batch, Source, Channels, TimeLen)
+        """
+        n_src = targets.shape[1]
+        assert est_targets[0].shape[0] == n_src
+        perms = torch.tensor(list(permutations(range(n_src))), dtype=torch.long)
+        loss_set = torch.stack(
+            [loss_func((est_targets[0][perm], est_targets[1][perm]), targets, **kwargs) for perm in perms], 
+            dim=1,
+        )
+        # Indexes and values of min losses for each batch element
+        min_loss, min_loss_idx = torch.min(loss_set, dim=1)
+        # Permutation indices for each batch.
+        batch_indices = torch.stack([perms[m] for m in min_loss_idx], dim=0)
+        return min_loss, batch_indices
+        
+    @staticmethod
+    def reorder_source(source, batch_indices):
+        r"""Reorder sources according to the best permutation.
+
+        Args:
+            source (torch.Tensor): Tensor of shape :math:`(batch, n_src, time)`
+            batch_indices (torch.Tensor): Tensor of shape :math:`(batch, n_src)`.
+                Contains optimal permutation indices for each batch.
+
+        Returns:
+            :class:`torch.Tensor`: Reordered sources.
+        """
+        """est_targets (list) has 2 elements:
+            [0]->Estimated Spec. : (Sources, Frames, Batch size, Channels, Freq. bins)
+            [1]->Estimated Signal: (Sources, Batch size, Channels, Time Length)
+        """
+        reordered_sources_f = torch.stack(
+            [source[0][src_idx, :, b, :, :] for b, src_idx in enumerate(batch_indices)],
+            dim=2
+        )
+        reordered_sources_t = torch.stack(
+            [source[1][src_idx, b, :, :] for b, src_idx in enumerate(batch_indices)],
+            dim=1
+        )
+        return (reordered_sources_f, reordered_sources_t)
+
 
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
@@ -43,7 +161,7 @@ def freq_domain_loss(s_hat, gt_spec, combination=True):
     _loss_mse = 0.0
     cnt = 0.0
     for i in range(n_src):
-        _loss_mse += singlesrc_mse(inferences[i], refrences[i]).mean()
+        _loss_mse += singlesrc_mse(inferences[i].transpose(0,1), refrences[i].transpose(0,1))
         cnt += 1.0
 
     # If Combination is True, calculate the expected combinations.
@@ -52,9 +170,9 @@ def freq_domain_loss(s_hat, gt_spec, combination=True):
             patterns = list(itertools.combinations(idx_list, c))
             for indices in patterns:
                 tmp_loss = singlesrc_mse(
-                    sum(itemgetter(*indices)(inferences)),
-                    sum(itemgetter(*indices)(refrences)),
-                ).mean()
+                    sum(itemgetter(*indices)(inferences)).transpose(0,1),
+                    sum(itemgetter(*indices)(refrences)).transpose(0,1),
+                )
                 _loss_mse += tmp_loss
                 cnt += 1.0
 
@@ -157,7 +275,7 @@ def weighted_sdr(input, gt, mix, weighted=True, eps=1e-10):
     )
     sdr_noise = num_noise / (denom_noise + eps)
 
-    return torch.mean(-alpha * sdr_cln - (1.0 - alpha) * sdr_noise)
+    return torch.mean(-alpha * sdr_cln - (1.0 - alpha) * sdr_noise, dim=0)
 
 
 class MultiDomainLoss(_Loss):
@@ -195,6 +313,7 @@ class MultiDomainLoss(_Loss):
         loss_combine_sources,
         loss_use_multidomain,
         mix_coef,
+        reduce='mean'
     ):
         super().__init__()
         self.transform = nn.Sequential(
@@ -214,6 +333,7 @@ class MultiDomainLoss(_Loss):
         else:
             print("Multi Domain Loss: {}".format(self._multi))
         self.cnt = 0
+        self.reduce = reduce
 
     def forward(self, est_targets, targets, return_est=False, **kwargs):
         """est_targets (list) has 2 elements:
@@ -240,4 +360,10 @@ class MultiDomainLoss(_Loss):
         else:
             loss = freq_domain_loss(spec_hat, Y, combination=self._combi)
 
-        return loss
+        if self.reduce == 'mean':
+            loss = loss.mean()
+
+        if return_est:
+            return loss, est_targets
+        else:
+            return loss

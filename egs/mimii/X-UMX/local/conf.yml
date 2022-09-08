@@ -11,14 +11,14 @@ optim:
   optimizer: adam
   lr: 0.001
   patience: 1000
-  lr_decay_patience: 80
-  lr_decay_gamma: 0.3
+  lr_decay_patience: 40
+  lr_decay_gamma: 0.5
   weight_decay: 0.00001
 # Data config
 data:
-  train_dir: /hdd/hdd1/mimii
+  train_dir: /dev/shm/mimii
   split: 6dB
-  output: /hdd/hdd1/lyj/xumx/test
+  output: /hdd/hdd1/sss/xumx/0907_8_task_random
   sample_rate: 16000
   num_workers: 4
   seed: 42
@@ -27,14 +27,14 @@ data:
   source_augmentations:
     - gain
     - delay
-  machine_type: slider
+  machine_type: valve
   sources:
     - id_00
     - id_02
   use_control: True
   control_type: rms
   task_random: True
-  source_random: True
+  source_random: False
 # Network config
 model:
   pretrained: null
@@ -45,5 +45,4 @@ model:
   hidden_size: 512
   bandwidth: 16000
   nb_channels: 2
-  nb_control_channels: 8
   spec_power: 1

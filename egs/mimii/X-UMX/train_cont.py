@@ -19,7 +19,7 @@ from asteroid.models.x_umx import _STFT, _Spectrogram
 
 from local import dataloader
 from pathlib import Path
-from loss import MultiDomainLoss
+from loss import MultiDomainLoss, CustomPITLossWrapper
 
 from pytorch_lightning.loggers import WandbLogger
 import wandb 
@@ -28,9 +28,6 @@ import wandb
 # In the hierarchical dictionary created when parsing, the key `key` can be
 # found at dic['main_args'][key]
 
-# choose gpu
-os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
-os.environ["CUDA_VISIBLE_DEVICES"]= "3"
 
 parser = argparse.ArgumentParser()
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
@@ -110,10 +107,11 @@ class XUMXManager(System):
     def common_step(self, batch, batch_nb, train=True, return_est=False):
         inputs, targets, labels = batch
         est_targets = self(inputs, labels)
-        loss = self.loss_func(est_targets, targets, return_est=return_est)
         if return_est:
-            return loss, est_targets
+            loss, perm_est_targets = self.loss_func(est_targets, targets, return_est=return_est)
+            return loss, perm_est_targets
         else:
+            loss = self.loss_func(est_targets, targets)
             return loss
 
     def validation_step(self, batch, batch_nb):
@@ -276,10 +274,12 @@ def main(conf, args):
         loss_combine_sources=args.loss_combine_sources,
         loss_use_multidomain=args.loss_use_multidomain,
         mix_coef=args.mix_coef,
+        reduce="",
     )
+    pit_loss_func = CustomPITLossWrapper(loss_func=loss_func, pit_from="perm_avg")
     system = XUMXManager(
         model=x_unmix,
-        loss_func=loss_func,
+        loss_func=pit_loss_func,
         optimizer=optimizer,
         train_loader=train_sampler,
         val_loader=valid_sampler,
