@@ -30,6 +30,7 @@ import wandb
 
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--conf", action="store", default="local/conf.yml")
 def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     freqs = np.linspace(0, float(rate) / 2, n_fft // 2 + 1, endpoint=True)
 
@@ -265,21 +266,34 @@ def main(conf, args):
     es = EarlyStopping(monitor="val_loss", mode="min", patience=args.patience, verbose=True)
 
     # Define Loss function.
-    loss_func = MultiDomainLoss(
-        window_length=args.window_length,
-        in_chan=args.in_chan,
-        n_hop=args.nhop,
-        spec_power=args.spec_power,
-        nb_channels=args.nb_channels,
-        loss_combine_sources=args.loss_combine_sources,
-        loss_use_multidomain=args.loss_use_multidomain,
-        mix_coef=args.mix_coef,
-        reduce="",
-    )
-    pit_loss_func = CustomPITLossWrapper(loss_func=loss_func, pit_from="perm_avg")
+    if args.loss_pit:
+        base_loss_func = MultiDomainLoss(
+            window_length=args.window_length,
+            in_chan=args.in_chan,
+            n_hop=args.nhop,
+            spec_power=args.spec_power,
+            nb_channels=args.nb_channels,
+            loss_combine_sources=args.loss_combine_sources,
+            loss_use_multidomain=args.loss_use_multidomain,
+            mix_coef=args.mix_coef,
+            reduce="",
+        )
+        pit_loss_func = CustomPITLossWrapper(loss_func=base_loss_func, pit_from="perm_avg")
+        loss_func = pit_loss_func
+    else:
+        loss_func = MultiDomainLoss(
+            window_length=args.window_length,
+            in_chan=args.in_chan,
+            n_hop=args.nhop,
+            spec_power=args.spec_power,
+            nb_channels=args.nb_channels,
+            loss_combine_sources=args.loss_combine_sources,
+            loss_use_multidomain=args.loss_use_multidomain,
+            mix_coef=args.mix_coef,
+        )
     system = XUMXManager(
         model=x_unmix,
-        loss_func=pit_loss_func,
+        loss_func=loss_func,
         optimizer=optimizer,
         train_loader=train_sampler,
         val_loader=valid_sampler,
@@ -324,7 +338,8 @@ if __name__ == "__main__":
     # We start with opening the config file conf.yml as a dictionary from
     # which we can create parsers. Each top level key in the dictionary defined
     # by the YAML file creates a group in the parser.
-    with open("local/conf.yml") as f:
+    args = parser.parse_args()          # just for conf name
+    with open(args.conf) as f:
         def_conf = yaml.safe_load(f)
     parser = prepare_parser_from_dict(def_conf, parser=parser)
 
