@@ -29,6 +29,30 @@ class TorchModel(nn.Module):
         x = self.ff(x)
         return x
 
+
+class IDNN(nn.Module):
+    def __init__(self, dim_input, dim_output):
+        super(IDNN,self).__init__()
+        self.ff = nn.Sequential(
+            nn.Linear(dim_input, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 16),
+            nn.ReLU(),
+            nn.Linear(16, 32),
+            nn.ReLU(),
+            nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64, dim_output),
+        )
+
+    def forward(self, x):
+        x = self.ff(x)
+        return x
+
+
+
 class TorchConvModel(nn.Module):
     def __init__(self):
         super(TorchConvModel,self).__init__()

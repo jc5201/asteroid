@@ -26,7 +26,7 @@ import museval
 
 
 from utils import *
-from model import IDNN
+from model import TorchModel
 ########################################################################
 
 
@@ -39,10 +39,10 @@ __versions__ = "1.0.3"
 
 ########################################################################
 # choose machine type and id
-S1 = 'id_00'
-S2 = 'id_02'
+S1 = 'id_04'
+S2 = 'id_06'
 MACHINE = 'valve'
-FILE = 'valve2_conv2.pth'
+FILE = 'valve_id46_IDNN.pth'
 
 
 
@@ -315,7 +315,7 @@ if __name__ == "__main__":
 
 
     # load base_directory list
-    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
+    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_04".format(base=param["base_directory"]))))
     # setup the result
     result_file = "{result}/{file_name}".format(result=param["result_directory"], file_name=param["result_file"])
     results = {}
@@ -360,7 +360,8 @@ if __name__ == "__main__":
                                                                           db=db)
    
         
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
+        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
+        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
 
         ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
         os.makedirs(ae_path, exist_ok= True)
@@ -394,10 +395,8 @@ if __name__ == "__main__":
 
             # model training
             print("============== MODEL TRAINING ==============")
-            n_mels = param["feature"]["n_mels"]
-            center_frames = param["feature"]["frames"]//2
-            dim_input = train_dataset.data_vector.shape[1] - n_mels
-            model[target_type] = IDNN(dim_input, dim_output = n_mels).cuda()
+            dim_input = train_dataset.data_vector.shape[1]
+            model[target_type] = TorchModel(dim_input).cuda()
             optimizer = torch.optim.Adam(model[target_type].parameters(), lr=1.0e-2)
             loss_fn = nn.MSELoss()
 
@@ -405,10 +404,8 @@ if __name__ == "__main__":
                 losses = []
                 for batch in train_loader:
                     batch = batch.cuda()
-                    gt = batch[:,n_mels*center_frames:n_mels*(center_frames+1)]
-                    batch = torch.cat([batch[:,:n_mels*center_frames], batch[:,n_mels*(center_frames+1):]],dim = 1)
                     pred = model[target_type](batch)
-                    loss = loss_fn(pred, gt)
+                    loss = loss_fn(pred, batch)
     
                     optimizer.zero_grad()
                     loss.backward()
@@ -447,9 +444,7 @@ if __name__ == "__main__":
                                         power=param["feature"]["power"])
             
             data = torch.Tensor(data).cuda()
-            data = torch.cat([data[:,:n_mels*center_frames], data[:,n_mels*(center_frames+1):]],dim = 1)
-            gt = data[:,n_mels*center_frames:n_mels*(center_frames+1)]
-            error = torch.mean(((gt - model[machine_type](data)) ** 2), dim=1)
+            error = torch.mean(((data - model[machine_type](data)) ** 2), dim=1)
 
             sep_sdr, _, _, _ = museval.evaluate(numpy.expand_dims(y_raw[machine_type][0, :ys.shape[0]], axis=(0,2)), 
                                         numpy.expand_dims(ys, axis=(0,2)))
