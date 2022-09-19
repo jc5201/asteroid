@@ -8,6 +8,8 @@ For anomaly detection code, refer `anomaly/README`.
 
 # Environment Setting
 ```base
+conda env create -n asteroid
+conda activate asteroid
 conda install python=3.7
 conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch-lts -c nvidia
 
@@ -57,8 +59,8 @@ Edit `anomaly/baseline.yaml`
 Edit `anomaly/baseline.py`
 
 * Check datapath near line 196
-** dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
-** Choose which machines (types, id) to use
+  * dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
+  * Choose which machines (types, id) to use
 
 ```bash
 cd anomaly
@@ -71,10 +73,10 @@ python baseline.py
 Edit `anomaly/baseline_mix.py`
 
 * Check datapath near line 228
-** dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
-** Choose which machines (types, id) to use
+  * dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
+  * Choose which machines (types, id) to use
 * Check machine_types near line 42
-** Those machine types will be used to make a mixture
+  * Those machine types will be used to make a mixture
 
 ```bash
 cd anomaly
@@ -87,12 +89,12 @@ python baseline_mix.py
 Edit `anomaly/baseline_src_xumx.py`
 
 * Check datapath near line 318
-** dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
-** Choose which machines (types, id) to use
+  * dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
+  * Choose which machines (types, id) to use
 * Check trained separation model path near 363
 * Check conf near line 43
-** S1, S2 -> machine id
-** FILE -> AE model path (to save)
+  * S1, S2 -> machine id
+  * FILE -> AE model path (to save)
 * 
 
 ```bash
