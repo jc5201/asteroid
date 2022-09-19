@@ -8,6 +8,8 @@ For anomaly detection code, refer `anomaly/README`.
 
 # Environment Setting
 ```base
+conda env create -n asteroid
+conda activate asteroid
 conda install python=3.7
 conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch-lts -c nvidia
 
@@ -18,50 +20,85 @@ pip install torchmetrics==0.6.0
 pip install museval wandb
 
 # for anomaly detection
-cd anomaly
-pip install -r requirements.txt
+pip install -r anomaly/requirements.txt
 
 ```
 
-# Run the code
+# Training Source Separation Models
 To run X-UMX change the configuration file considering the type of data and the use of control signal.
 ## 1. First change the configuration 
 ```bash
-cd egs/mimii/X-UMX/local
-. ./conf.yml
+cd egs/mimii/X-UMX
+vi local/conf_???.yml
 ```
-### to run the model with control signal 
-### in MIMII dataset:
-```bash
-data:
-  train_dir:/mimii
-  machine_type: slider or valve
-  sources:
-   - id_00
-   - id_02
-  use_control: True
-  control_type: mfcc or rms
-```
-### in conveyer dataset:
-```bash
-data:
-  train_dir:/sss
-  machine_type: conveyer
-  sources:
-   - close
-   - far
-  use_control: True
-  control_type: mfcc
-```
-Use `XUMXControlMFCC` model instead of `XUMXControl` model.
 
-### to run the model without control signal 
-everything is same with "without control setting", but set the use_control as False.
+Edit `local/conf_base.yml` for XUMX baseline and `local/conf_informed.yml` for informed source separation model.
+
+* data:train_dir -> MIMII dataset directory
+* data:output -> directory where checkpoint and log files will be saved
+* data:machine_type -> machine types to use
+* data:sources -> machine ids to use
+* model:pretrained -> pretrained model path
 
 ## 2. train the model by running
 ```bash
 cd egs/mimii/X-UMX
-train.py or train_cont.py
+train.py --conf local/conf_base.yml
 ```
-Run train.py for without control setting and train_cont.py for with control setting.
+Run train.py for with given configuration file.
+
+
+# Anomaly Detection models
+
+Edit `anomaly/baseline.yaml`
+
+* base_directory -> MIMII dataset path
+
+## Oracle baseline
+
+Edit `anomaly/baseline.py`
+
+* Check datapath near line 196
+  * dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
+  * Choose which machines (types, id) to use
+
+```bash
+cd anomaly
+python baseline.py
+```
+
+
+## Mixture baseline
+
+Edit `anomaly/baseline_mix.py`
+
+* Check datapath near line 228
+  * dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
+  * Choose which machines (types, id) to use
+* Check machine_types near line 42
+  * Those machine types will be used to make a mixture
+
+```bash
+cd anomaly
+python baseline_mix.py
+```
+
+## Proposed Method
+
+
+Edit `anomaly/baseline_src_xumx.py`
+
+* Check datapath near line 318
+  * dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
+  * Choose which machines (types, id) to use
+* Check trained separation model path near 363
+* Check conf near line 43
+  * S1, S2 -> machine id
+  * FILE -> AE model path (to save)
+* 
+
+```bash
+cd anomaly
+python baseline_src_xumx.py
+```
 
