@@ -26,10 +26,12 @@ import yaml
 # from import
 from tqdm import tqdm
 from sklearn import metrics
-from keras.models import Model
-from keras.layers import Input, Dense
+
+import torch
+import torch.nn as nn
 
 from utils import *
+from model import TorchModel
 ########################################################################
 
 
@@ -112,6 +114,30 @@ def train_list_to_mixture_spec_vector_array(file_list,
     return dataset
 
 
+class AEDatasetMix(torch.utils.data.Dataset):
+    def __init__(self, 
+            file_list,
+            param,
+            target_source=None,
+            ):
+        self.file_list = file_list
+        self.target_source = target_source
+
+        self.data_vector = train_list_to_mixture_spec_vector_array(self.file_list,
+                                            msg="generate train_dataset",
+                                            n_mels=param["feature"]["n_mels"],
+                                            frames=param["feature"]["frames"],
+                                            n_fft=param["feature"]["n_fft"],
+                                            hop_length=param["feature"]["hop_length"],
+                                            power=param["feature"]["power"],
+                                            )        
+    
+    def __getitem__(self, index):
+        return torch.Tensor(self.data_vector[index, :])
+    
+    def __len__(self):
+        return self.data_vector.shape[0]
+
 def dataset_generator(target_dir,
                       normal_dir_name="normal",
                       abnormal_dir_name="abnormal",
@@ -184,29 +210,6 @@ def dataset_generator(target_dir,
 
 ########################################################################
 
-
-########################################################################
-# keras model
-########################################################################
-def keras_model(inputDim):
-    """
-    define the keras model
-    the model based on the simple dense auto encoder (64*64*8*64*64)
-    """
-    inputLayer = Input(shape=(inputDim,))
-    h = Dense(64, activation="relu")(inputLayer)
-    h = Dense(64, activation="relu")(h)
-    h = Dense(8, activation="relu")(h)
-    h = Dense(64, activation="relu")(h)
-    h = Dense(64, activation="relu")(h)
-    h = Dense(inputDim, activation=None)(h)
-
-    return Model(inputs=inputLayer, outputs=h)
-
-
-########################################################################
-
-
 ########################################################################
 # main
 ########################################################################
@@ -270,47 +273,41 @@ if __name__ == "__main__":
 
         # dataset generator
         print("============== DATASET_GENERATOR ==============")
-        # if os.path.exists(train_pickle):
-        #     # train_data = load_pickle(train_pickle)
-        #     # if os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
-        #     eval_files = load_pickle(eval_files_pickle)
-        #     eval_labels = load_pickle(eval_labels_pickle)
-        # else:
-        train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
+        if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
+            train_files= load_pickle(train_pickle)
+            eval_files = load_pickle(eval_files_pickle)
+            eval_labels = load_pickle(eval_labels_pickle)
+        else:
+            train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
 
-        train_data = train_list_to_mixture_spec_vector_array(train_files,
-                                            msg="generate train_dataset",
-                                            n_mels=param["feature"]["n_mels"],
-                                            frames=param["feature"]["frames"],
-                                            n_fft=param["feature"]["n_fft"],
-                                            hop_length=param["feature"]["hop_length"],
-                                            power=param["feature"]["power"])
+        train_dataset = AEDatasetMix(train_files, param)
+        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=param["fit"]["batch_size"], shuffle=True)
 
-        save_pickle(train_pickle, train_data)
+        save_pickle(train_pickle, train_files)
         save_pickle(eval_files_pickle, eval_files)
         save_pickle(eval_labels_pickle, eval_labels)
 
         # model training
         print("============== MODEL TRAINING ==============")
-        model = keras_model(param["feature"]["n_mels"] * param["feature"]["frames"])
-        model.summary()
+        dim_input = train_dataset.data_vector.shape[1]
+        model = TorchModel(dim_input).cuda()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-3)
+        loss_fn = nn.MSELoss()
+ 
+        for epoch in range(param["fit"]["epochs"]):
+            losses = []
+            for batch in train_loader:
+                batch = batch.cuda()
+                pred = model(batch)
+                loss = loss_fn(pred, batch)
 
-        # training
-        if os.path.exists(model_file):
-            model.load_weights(model_file)
-        else:
-            model.compile(**param["fit"]["compile"])
-            history = model.fit(train_data,
-                                train_data,
-                                epochs=param["fit"]["epochs"],
-                                batch_size=param["fit"]["batch_size"],
-                                shuffle=param["fit"]["shuffle"],
-                                validation_split=param["fit"]["validation_split"],
-                                verbose=param["fit"]["verbose"])
-
-            visualizer.loss_plot(history.history["loss"], history.history["val_loss"])
-            visualizer.save_figure(history_img)
-            model.save_weights(model_file)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                losses.append(loss.item())
+            if epoch % 10 == 0:
+                print(f"epoch {epoch}: loss {sum(losses) / len(losses)}")
+        model.eval()
 
         # evaluation
         print("============== EVALUATION ==============")
@@ -318,11 +315,7 @@ if __name__ == "__main__":
         y_true = numpy.array(eval_labels)
 
         eval_types = {mt: [] for mt in machine_types}
-        # ys = 0
-        # for machine in machine_types:
-        #     filename = file_list[idx].replace('fan', machine)
-        #     sr, y = file_to_wav(filename)
-        #     ys = ys + y
+    
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
             try:
                 machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
@@ -335,8 +328,11 @@ if __name__ == "__main__":
                                             n_fft=param["feature"]["n_fft"],
                                             hop_length=param["feature"]["hop_length"],
                                             power=param["feature"]["power"])
-                error = numpy.mean(numpy.square(data - model.predict(data)), axis=1)
-                y_pred[num] = numpy.mean(error)
+
+                data = torch.Tensor(data).cuda()
+                error = torch.mean(((data - model(data)) ** 2), dim=1)
+                y_pred[num] = torch.mean(error).detach().cpu().numpy()
+                
                 if num < num_eval_normal:
                     for mt in machine_types:
                         eval_types[mt].append(num)
