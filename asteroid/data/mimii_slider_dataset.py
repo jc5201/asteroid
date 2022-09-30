@@ -10,7 +10,7 @@ import librosa
 from itertools import product
 import numpy as np
 
-from mimii_valve_dataset import MIMIIValveDataset
+from .mimii_valve_dataset import MIMIIValveDataset
 
 class MIMIISliderDataset(MIMIIValveDataset):
 

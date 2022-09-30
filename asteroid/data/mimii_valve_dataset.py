@@ -104,14 +104,14 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         self.samples_per_track = samples_per_track
         self.normal = normal
         self.source_random = source_random
-        self.tracks = list(self.get_tracks())
-        if not self.tracks:
-            raise RuntimeError("No tracks found.")
         self.use_control = use_control 
         self.normal = True
         self.task_random = task_random
-
         self.machine_type_dir = "valve"
+
+        self.tracks = list(self.get_tracks())
+        if not self.tracks:
+            raise RuntimeError("No tracks found.")
 
     def __getitem__(self, index):
        
