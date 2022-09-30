@@ -1,4 +1,4 @@
-from asteroid.data import MIMIISingleDataset, MIMIIValveDataset
+from asteroid.data import MIMIISliderDataset, MIMIIValveDataset
 import torch
 from pathlib import Path
 import numpy as np
@@ -30,8 +30,15 @@ def load_datasets(parser, args):
     #     Dataset = ConveyerDataset
     #     validation_tracks = ["Track002", "Track003", "Track004", "Track005"]
     # else:
-    Dataset = MIMIIValveDataset
-    validation_tracks = validation_tracks = ["00000000", "00000001","00000002", "00000003"]
+    if args.machine_type == 'valve':
+        Dataset = MIMIIValveDataset
+        validation_tracks = validation_tracks = ["00000000", "00000001","00000002", "00000003"]
+    elif args.machine_type == 'slider':
+        Dataset = MIMIISliderDataset
+        validation_tracks = validation_tracks = ["00000000", "00000001","00000002", "00000003"]
+    else:
+        raise Exception("unexpected machine type")
+
     
     train_dataset = Dataset(
         split=args.split,
@@ -62,6 +69,7 @@ def load_datasets(parser, args):
         segment=args.val_dur,
         sample_rate=args.sample_rate,
         use_control=args.use_control,
+        task_random=args.task_random,
         source_random=args.source_random,
         # machine_type = args.machine_type,         # for conveyor
         # control_type = args.control_type,
