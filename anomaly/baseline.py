@@ -193,7 +193,8 @@ if __name__ == "__main__":
     visualizer = visualizer()
 
     # load base_directory list
-    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
+    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/*".format(base=param["base_directory"]))))
+    print(dirs)
 
     # setup the result
     result_file = "{result}/{file_name}".format(result=param["result_directory"], file_name=param["result_file"])
@@ -224,7 +225,7 @@ if __name__ == "__main__":
                                                                                        machine_type=machine_type,
                                                                                        machine_id=machine_id,
                                                                                        db=db)
-        model_file = "{model}/model_{machine_type}_{machine_id}_{db}.hdf5".format(model=param["model_directory"],
+        model_file = "{model}/model_{machine_type}_{machine_id}_{db}.pth".format(model=param["model_directory"],
                                                                                   machine_type=machine_type,
                                                                                   machine_id=machine_id,
                                                                                   db=db)
@@ -292,6 +293,8 @@ if __name__ == "__main__":
             error = torch.mean(((data - model(data)) ** 2), dim=1)
             y_pred[num] = torch.mean(error).detach().cpu().numpy()
 
+        # save model
+        torch.save(model.state_dict(), model_file)
         score = metrics.roc_auc_score(y_true, y_pred)
         logger.info("anomaly score abnormal : {}".format(str(numpy.array(y_pred)[y_true.astype(bool)])))
         logger.info("anomaly score normal : {}".format(str(numpy.array(y_pred)[numpy.logical_not(y_true)])))

@@ -360,8 +360,8 @@ if __name__ == "__main__":
                                                                           db=db)
    
         
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
-        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
+        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
+        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
 
         ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
         os.makedirs(ae_path, exist_ok= True)
@@ -383,7 +383,7 @@ if __name__ == "__main__":
             save_pickle(eval_files_pickle, eval_files)
             save_pickle(eval_labels_pickle, eval_labels)
         
-        model = {}
+        
         for target_type in machine_types:
             train_dataset = AEDataset(sep_model, train_files, param, target_source=target_type)
             train_loader = torch.utils.data.DataLoader(
@@ -396,26 +396,26 @@ if __name__ == "__main__":
             # model training
             print("============== MODEL TRAINING ==============")
             dim_input = train_dataset.data_vector.shape[1]
-            model[target_type] = TorchModel(dim_input).cuda()
-            model[target_type](torch.load(model_file))
-            # optimizer = torch.optim.Adam(model[target_type].parameters(), lr=1.0e-2)
-            # loss_fn = nn.MSELoss()
+            model = TorchModel(dim_input).cuda()
+            
+            optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-2)
+            loss_fn = nn.MSELoss()
 
-            # for epoch in range(param["fit"]["epochs"]):
-            #     losses = []
-            #     for batch in train_loader:
-            #         batch = batch.cuda()
-            #         pred = model[target_type](batch)
-            #         loss = loss_fn(pred, batch)
+            for epoch in range(param["fit"]["epochs"]):
+                losses = []
+                for batch in train_loader:
+                    batch = batch.cuda()
+                    pred = model(batch)
+                    loss = loss_fn(pred, batch)
     
-            #         optimizer.zero_grad()
-            #         loss.backward()
-            #         optimizer.step()
-            #         losses.append(loss.item())
-            #     if epoch % 10 == 0:
-            #         print(f"epoch {epoch}: loss {sum(losses) / len(losses)}")
-            # torch.save(model[target_type].state_dict(), ae_path_target)
-            model[target_type].eval()
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    losses.append(loss.item())
+                if epoch % 10 == 0:
+                    print(f"epoch {epoch}: loss {sum(losses) / len(losses)}")
+            torch.save(model.state_dict(), ae_path_target)
+            model.eval()
                
         # evaluation
         print("============== EVALUATION ==============")
@@ -445,7 +445,7 @@ if __name__ == "__main__":
                                         power=param["feature"]["power"])
             
             data = torch.Tensor(data).cuda()
-            error = torch.mean(((data - model[machine_type](data)) ** 2), dim=1)
+            error = torch.mean(((data - model(data)) ** 2), dim=1)
 
             sep_sdr, _, _, _ = museval.evaluate(numpy.expand_dims(y_raw[machine_type][0, :ys.shape[0]], axis=(0,2)), 
                                         numpy.expand_dims(ys, axis=(0,2)))
