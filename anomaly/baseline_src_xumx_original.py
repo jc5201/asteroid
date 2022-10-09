@@ -42,7 +42,7 @@ __versions__ = "1.0.3"
 S1 = 'id_00'
 S2 = 'id_02'
 MACHINE = 'valve'
-FILE = 'valve_id00_02_gt.pth'
+FILE = 'valve_conditioned_test1.pth'
 
 
 
@@ -360,8 +360,8 @@ if __name__ == "__main__":
                                                                           db=db)
    
         
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
-        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
+        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
+        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
 
         ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
         os.makedirs(ae_path, exist_ok= True)
@@ -397,24 +397,24 @@ if __name__ == "__main__":
             print("============== MODEL TRAINING ==============")
             dim_input = train_dataset.data_vector.shape[1]
             model[target_type] = TorchModel(dim_input).cuda()
-            model[target_type](torch.load(model_file))
-            # optimizer = torch.optim.Adam(model[target_type].parameters(), lr=1.0e-2)
-            # loss_fn = nn.MSELoss()
+            #model[target_type](torch.load(model_file))
+            optimizer = torch.optim.Adam(model[target_type].parameters(), lr=1.0e-2)
+            loss_fn = nn.MSELoss()
 
-            # for epoch in range(param["fit"]["epochs"]):
-            #     losses = []
-            #     for batch in train_loader:
-            #         batch = batch.cuda()
-            #         pred = model[target_type](batch)
-            #         loss = loss_fn(pred, batch)
+            for epoch in range(param["fit"]["epochs"]):
+                losses = []
+                for batch in train_loader:
+                    batch = batch.cuda()
+                    pred = model[target_type](batch)
+                    loss = loss_fn(pred, batch)
     
-            #         optimizer.zero_grad()
-            #         loss.backward()
-            #         optimizer.step()
-            #         losses.append(loss.item())
-            #     if epoch % 10 == 0:
-            #         print(f"epoch {epoch}: loss {sum(losses) / len(losses)}")
-            # torch.save(model[target_type].state_dict(), ae_path_target)
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    losses.append(loss.item())
+                if epoch % 10 == 0:
+                    print(f"epoch {epoch}: loss {sum(losses) / len(losses)}")
+            torch.save(model[target_type].state_dict(), ae_path_target)
             model[target_type].eval()
                
         # evaluation
