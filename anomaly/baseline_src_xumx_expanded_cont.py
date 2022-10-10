@@ -53,7 +53,8 @@ S1 = 'id_00'
 S2 = 'id_02'
 MACHINE = 'valve'
 FILE = 'valve_conditioned_test1.pth'
-
+xumx_model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
+ae_path_base = '/hdd/hdd1/kjc/xumx/ae/cont'
 
 machine_types = [S1, S2]
 num_eval_normal = 250
@@ -114,7 +115,6 @@ def train_list_to_mix_sep_spec_vector_array(file_list,
         # convert active labels in wav domain to spectrogram domain
         Tb = vector_array.shape[0] + frames - 1
         active_labels_ = active_labels[target_idx, :1, :].clone()
-        control_spec = F.adaptive_max_pool1d(active_labels_, output_size=Tb) # (1, 313)
         control_spec = F.adaptive_max_pool1d(active_labels_, output_size=Tb).repeat(n_mels, 1)
         
         control_spec_stack = numpy.zeros((vector_array.shape[0], dims), float) #(309, 5)
@@ -123,13 +123,12 @@ def train_list_to_mix_sep_spec_vector_array(file_list,
             control_spec_stack[:, n_mels*t:n_mels*(t + 1)] = control_spec[:, t: t + vector_array.shape[0]].T  # (309, 1) 
             
         # concat audio and activity labels
-        print(control_spec_stack.shape)
-        vector_array = numpy.concatenate((vector_array, control_spec_stack), axis = 1)
+        vector_control_array = numpy.concatenate((vector_array, control_spec_stack), axis = 1)
 
         if idx == 0:
             dataset = numpy.zeros((vector_array.shape[0] * len(file_list), dims*2), float)
           
-        dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :] = vector_array
+        dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :] = vector_control_array
 
     return dataset
 
@@ -225,14 +224,10 @@ if __name__ == "__main__":
                                                                           machine_id=machine_id,
                                                                           db=db)
    
-        
-        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
-
-        ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
+        ae_path = f'{ae_path_base}/{MACHINE}'
         os.makedirs(ae_path, exist_ok= True)
 
-        sep_model = xumx_model(model_path)
+        sep_model = xumx_model(xumx_model_path)
         sep_model.eval()
         sep_model = sep_model.cuda()
 
@@ -272,7 +267,7 @@ if __name__ == "__main__":
                 for batch in train_loader:
                     batch = batch.cuda()
                     pred = model[target_type](batch)
-                    loss = loss_fn(pred, batch)
+                    loss = loss_fn(pred[:, :320], batch[:, :320])
     
                     optimizer.zero_grad()
                     loss.backward()
@@ -316,7 +311,6 @@ if __name__ == "__main__":
             n_mels = param["feature"]["n_mels"]
             Tb = data.shape[0] + frames - 1
             active_labels_ = active_labels[target_idx, :1, :].clone()
-            control_spec = F.adaptive_max_pool1d(active_labels_, output_size=Tb) # (1, 313)
             control_spec = F.adaptive_max_pool1d(active_labels_, output_size=Tb).repeat(n_mels, 1)
             control_spec_stack = numpy.zeros((data.shape[0], frames*n_mels), float) #(309, 5)
             for t in range(frames):
@@ -326,7 +320,7 @@ if __name__ == "__main__":
             data = numpy.concatenate((data, control_spec_stack), axis = 1)
                     
             data = torch.Tensor(data).cuda()
-            error = torch.mean(((data - model[machine_type](data)) ** 2), dim=1)
+            error = torch.mean(((data[:, :320] - model[machine_type](data)[:, :320]) ** 2), dim=1)
 
             sep_sdr, _, _, _ = museval.evaluate(numpy.expand_dims(y_raw[machine_type][0, :ys.shape[0]], axis=(0,2)), 
                                         numpy.expand_dims(ys, axis=(0,2)))
