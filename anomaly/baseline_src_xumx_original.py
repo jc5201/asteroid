@@ -45,6 +45,8 @@ MACHINE = 'valve'
 FILE = 'valve_conditioned_test1.pth'
 
 
+machine_types = [S1, S2]
+num_eval_normal = 250
 
 ########################################################################
 
@@ -133,9 +135,6 @@ def xumx_model(path):
 
     return system.model
 
-
-machine_types = [S1, S2]
-num_eval_normal = 250
 
 
 def train_list_to_mix_sep_spec_vector_array(file_list,
