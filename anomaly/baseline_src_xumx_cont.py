@@ -208,6 +208,55 @@ def train_list_to_mix_sep_spec_vector_array(file_list,
     return dataset
 
 
+def train_list_to_gt_spec_vector_array(file_list,
+                         msg="calc...",
+                         n_mels=64,
+                         frames=5,
+                         n_fft=1024,
+                         hop_length=512,
+                         power=2.0,
+                         sep_model=None,
+                         target_source=None):
+
+    # 01 calculate the number of dimensions
+    dims = n_mels * frames
+
+    # 02 loop of file_to_vectorarray
+    for idx in tqdm(range(len(file_list)), desc=msg):
+        machine_type = os.path.split(os.path.split(os.path.split(file_list[idx])[0])[0])[1]
+        target_type = target_source
+
+        file_name = file_list[idx].replace(machine_type, target_type)
+        sr, y = file_to_wav_stereo(file_name)
+        active_labels = generate_label(y)
+        
+        vector_array = wav_to_spec_vector_array(sr, y[0, :],
+                                            n_mels=n_mels,
+                                            frames=frames,
+                                            n_fft=n_fft,
+                                            hop_length=hop_length,
+                                            power=power)   # (309, 320) = (time, n_mels*frames)
+        
+           
+        # convert active labels in wav domain to spectrogram domain
+        Tb = vector_array.shape[0] + frames - 1
+        active_labels_ = active_labels[:1, :].clone()
+        control_spec = F.adaptive_max_pool1d(active_labels_, output_size=Tb) # (1, 313)
+        control_spec_stack = numpy.zeros((vector_array.shape[0], frames), float) #(309, 5)
+        for t in range(frames):
+            control_spec_stack[:, t:(t + 1)] = control_spec[:, t: t + vector_array.shape[0]].T  # (309, 1) 
+       
+        # concat audio and activity labels
+        vector_array = numpy.concatenate((vector_array, control_spec_stack), axis = 1)
+
+        if idx == 0:
+            dataset = numpy.zeros((vector_array.shape[0] * len(file_list), dims + frames), float)
+          
+        dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :] = vector_array
+
+    return dataset
+
+
 class AEDataset(torch.utils.data.Dataset):
     def __init__(self, 
             sep_model, 
@@ -227,6 +276,33 @@ class AEDataset(torch.utils.data.Dataset):
                                             hop_length=param["feature"]["hop_length"],
                                             power=param["feature"]["power"],
                                             sep_model = self.sep_model,
+                                            target_source=target_source)
+        
+    
+    def __getitem__(self, index):
+        return torch.Tensor(self.data_vector[index, :])
+    
+    def __len__(self):
+        return self.data_vector.shape[0]
+
+
+class AEGTDataset(torch.utils.data.Dataset):
+    def __init__(self,  
+            file_list,
+            param,
+            target_source=None,
+            ):
+        
+        self.file_list = file_list
+        self.target_source = target_source
+
+        self.data_vector = train_list_to_gt_spec_vector_array(self.file_list,
+                                            msg="generate train_dataset",
+                                            n_mels=param["feature"]["n_mels"],
+                                            frames=param["feature"]["frames"],
+                                            n_fft=param["feature"]["n_fft"],
+                                            hop_length=param["feature"]["hop_length"],
+                                            power=param["feature"]["power"],
                                             target_source=target_source)
         
     
@@ -401,7 +477,11 @@ if __name__ == "__main__":
         
         model = {}
         for target_type in machine_types:
-            train_dataset = AEDataset(sep_model, train_files, param, target_source=target_type)
+            if param['gt']:
+                print(eval_files)
+                train_dataset = AEGTDataset(train_files, param, target_source=target_type)
+            else:
+                train_dataset = AEDataset(sep_model, train_files, param, target_source=target_type)
             train_loader = torch.utils.data.DataLoader(
                 train_dataset, batch_size=param["fit"]["batch_size"], shuffle=True,
             )
@@ -422,6 +502,8 @@ if __name__ == "__main__":
                 for batch in train_loader:
                     batch = batch.cuda()
                     pred = model[target_type](batch)
+                    print("pred:", pred.shape)
+                    print("batch:", batch.shape)
                     loss = loss_fn(pred, batch)
     
                     optimizer.zero_grad()
@@ -444,14 +526,27 @@ if __name__ == "__main__":
         
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
             machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
-            target_idx = machine_types.index(machine_type)  
-            
-            sr, mixture_y, y_raw, active_label_sources = eval_file_to_mixture_wav_label(file_name)
-            
-            active_labels = torch.stack([active_label_sources[src] for src in machine_types])
-            _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
-            # [src, b, ch, time]
-            ys = time[target_idx, 0, 0, :].detach().cpu().numpy()
+            target_idx = machine_types.index(machine_type)
+
+            if param['gt']:
+                sr, ys = file_to_wav_stereo(file_name)
+                active_labels = generate_label(ys)
+                active_labels_ = active_labels[:1, :].clone()
+            else:  
+                sr, mixture_y, y_raw, active_label_sources = eval_file_to_mixture_wav_label(file_name)
+                
+                active_labels = torch.stack([active_label_sources[src] for src in machine_types])
+                _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
+                # [src, b, ch, time]
+                ys = time[target_idx, 0, 0, :].detach().cpu().numpy()
+                active_labels_ = active_labels[target_idx, :1, :].clone()
+
+                sep_sdr, _, _, _ = museval.evaluate(numpy.expand_dims(y_raw[machine_type][0, :ys.shape[0]], axis=(0,2)), 
+                                        numpy.expand_dims(ys, axis=(0,2)))
+                if num < num_eval_normal * 2: # normal file
+                    sdr_pred_normal[machine_type].append(numpy.mean(sep_sdr))
+                else: # abnormal file
+                    sdr_pred_abnormal[machine_type].append(numpy.mean(sep_sdr))
             
             data = wav_to_spec_vector_array(sr, ys,
                                         n_mels=param["feature"]["n_mels"],
@@ -460,14 +555,12 @@ if __name__ == "__main__":
                                         hop_length=param["feature"]["hop_length"],
                                         power=param["feature"]["power"])    #(309, 320)
 
-                
+ 
+
             # convert active labels in wav domain to spectrogram domain
             frames = int(param["feature"]["frames"])
             Tb = data.shape[0] + frames - 1
-            active_labels_ = active_labels[target_idx, :1, :].clone()
             control_spec = F.adaptive_max_pool1d(active_labels_, output_size=Tb) # (1, 313)
-            control_spec = F.adaptive_max_pool1d(active_labels_, output_size=Tb).repeat(param["feature"]["n_mels"], 1)
-            print(control_spec.shape)
             control_spec_stack = numpy.zeros((data.shape[0], frames), float) #(309, 5)
             for t in range(frames):
                 control_spec_stack[:, t:(t + 1)] = control_spec[:, t: t + data.shape[0]].T  # (309, 1) 
@@ -478,17 +571,10 @@ if __name__ == "__main__":
             data = torch.Tensor(data).cuda()
             error = torch.mean(((data - model[machine_type](data)) ** 2), dim=1)
 
-            sep_sdr, _, _, _ = museval.evaluate(numpy.expand_dims(y_raw[machine_type][0, :ys.shape[0]], axis=(0,2)), 
-                                        numpy.expand_dims(ys, axis=(0,2)))
-
             y_pred[num] = torch.mean(error).detach().cpu().numpy()
             eval_types[machine_type].append(num)
 
-            if num < num_eval_normal * 2: # normal file
-                sdr_pred_normal[machine_type].append(numpy.mean(sep_sdr))
-            else: # abnormal file
-                sdr_pred_abnormal[machine_type].append(numpy.mean(sep_sdr))
-
+            
         scores = []
         anomaly_detect_score = {}
 
@@ -498,10 +584,11 @@ if __name__ == "__main__":
             logger.info("AUC_{} : {}".format(machine_type, score))
             evaluation_result["AUC_{}".format(machine_type)] = float(score)
             scores.append(score)
-            logger.info("SDR_normal_{} : {}".format(machine_type, sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type])))
-            logger.info("SDR_abnormal_{} : {}".format(machine_type, sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type])))
-            evaluation_result["SDR_normal_{}".format(machine_type)] = float(sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type]))
-            evaluation_result["SDR_abnormal_{}".format(machine_type)] = float(sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type]))
+            if param['gt']:
+                logger.info("SDR_normal_{} : {}".format(machine_type, sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type])))
+                logger.info("SDR_abnormal_{} : {}".format(machine_type, sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type])))
+                evaluation_result["SDR_normal_{}".format(machine_type)] = float(sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type]))
+                evaluation_result["SDR_abnormal_{}".format(machine_type)] = float(sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type]))
         score = sum(scores) / len(scores)
         logger.info("AUC : {}".format(score))
         evaluation_result["AUC"] = float(score)
