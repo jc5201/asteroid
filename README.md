@@ -4,8 +4,6 @@
 
 This repository is based on https://github.com/asteroid-team/asteroid.
 
-For anomaly detection code, refer `anomaly/README`.
-
 # Environment Setting
 ```base
 conda env create -n asteroid
@@ -86,7 +84,7 @@ python baseline_mix.py
 ## Proposed Method
 
 
-Edit `anomaly/baseline_src_xumx.py`
+Edit `anomaly/baseline_src_xumx_original.py`
 
 * Check datapath near line 318
   * dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
@@ -99,6 +97,6 @@ Edit `anomaly/baseline_src_xumx.py`
 
 ```bash
 cd anomaly
-python baseline_src_xumx.py
+python baseline_src_xumx_original.py
 ```
 

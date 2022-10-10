@@ -406,8 +406,7 @@ def main(conf, args):
             mix_coef=args.mix_coef,
             reduce="",
         )
-        pit_loss_func = CustomPITLossWrapper(loss_func=base_loss_func, pit_from="perm_avg")
-        loss_func = pit_loss_func
+        loss_func = CustomPITLossWrapper(loss_func=base_loss_func, pit_from="perm_avg")
     else:
         loss_func = MultiDomainLoss(
             window_length=args.window_length,
@@ -418,6 +417,7 @@ def main(conf, args):
             loss_combine_sources=args.loss_combine_sources,
             loss_use_multidomain=args.loss_use_multidomain,
             mix_coef=args.mix_coef,
+            reduce="mean",
         )
     if args.use_control:
         system = XUMXControlManager(
@@ -463,7 +463,7 @@ def main(conf, args):
         default_root_dir=exp_dir,
         gpus=gpus,
         distributed_backend=distributed_backend,
-        limit_train_batches=1.0,  # Useful for fast experiment
+        # limit_train_batches=1.0,  # Useful for fast experiment
         logger = wandb_logger,
     )
     trainer.fit(system)

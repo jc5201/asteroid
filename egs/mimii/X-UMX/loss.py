@@ -51,7 +51,7 @@ class CustomPITLossWrapper(PITLossWrapper):
             )
 
             reordered = self.reorder_source(est_targets, batch_indices)
-            loss = self.loss_func(est_targets, targets)
+            loss = self.loss_func(reordered, targets)
             mean_loss = torch.mean(loss)
             if return_est:
                 return mean_loss, reordered

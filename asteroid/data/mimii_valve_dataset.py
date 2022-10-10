@@ -87,7 +87,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         normal=True,
         use_control=False,
         task_random = False,
-        source_random = False
+        source_random = False,
     ):
 
         self.root = Path(root).expanduser()
@@ -104,12 +104,14 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         self.samples_per_track = samples_per_track
         self.normal = normal
         self.source_random = source_random
-        self.tracks = list(self.get_tracks())
-        if not self.tracks:
-            raise RuntimeError("No tracks found.")
         self.use_control = use_control 
         self.normal = True
         self.task_random = task_random
+        self.machine_type_dir = "valve"
+
+        self.tracks = list(self.get_tracks())
+        if not self.tracks:
+            raise RuntimeError("No tracks found.")
 
     def __getitem__(self, index):
        
@@ -170,20 +172,9 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
             #[channel, time]
             
             if self.use_control:
-                rms_fig = librosa.feature.rms(y=np.transpose(np_audio)) #[1, 313]
-                rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-                # [channel, time, 1]
-                rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
-                # [channel, time]
-
-                k = int(audio.shape[1]*0.8)
-                min_threshold, _ = torch.kthvalue(rms_trim, k)
-
-                label = (rms_trim > min_threshold).type(torch.float) 
-                # label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
-                label = label.expand(audio.shape[0], -1)
-                active_label_sources[source] = label
+                label = self.generate_label(audio)
                 #[channel, time]
+                active_label_sources[source] = label
 
         # apply linear mix over source index=0
         # make mixture for i-th channel and use 0-th chnnel as gt
@@ -209,6 +200,23 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
 
         return audio_mix, audio_sources
 
+    def generate_label(self, audio):
+        # np, [1, 313]
+        rms_fig = librosa.feature.rms(y=audio.numpy()) #[1, 313]
+        rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
+        # [channel, time, 1]
+        rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+        # [channel, time]
+
+        k = int(audio.shape[1]*0.8)
+        min_threshold, _ = torch.kthvalue(rms_trim, k)
+
+        label = (rms_trim > min_threshold).type(torch.float) 
+        # label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
+        label = label.expand(audio.shape[0], -1)
+        #[channel, time]
+        return label
+
     def __len__(self):
         return len(self.tracks) * self.samples_per_track
 
@@ -218,10 +226,10 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         pp = []
         if self.source_random:
             for src in self.sources:
-                pp.extend(p.glob(f'valve/{src}/{"normal" if self.normal else "abnormal"}/*.wav'))
+                pp.extend(p.glob(f'{self.machine_type_dir}/{src}/{"normal" if self.normal else "abnormal"}/*.wav'))
         else:
-            pp.extend(p.glob(f'valve/id_00/{"normal" if self.normal else "abnormal"}/*.wav'))
-        
+            pp.extend(p.glob(f'{self.machine_type_dir}/id_00/{"normal" if self.normal else "abnormal"}/*.wav'))
+
         for track_path in tqdm.tqdm(pp):
             if self.subset and track_path.stem not in self.subset:
                 # skip this track
