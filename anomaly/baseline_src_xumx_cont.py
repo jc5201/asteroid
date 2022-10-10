@@ -396,6 +396,10 @@ def dataset_generator(target_dir,
 ########################################################################
 if __name__ == "__main__":
 
+    # set gpu
+    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
+    os.environ["CUDA_VISIBLE_DEVICES"]= "0"  
+
     # load parameter yaml
     with open("baseline.yaml") as stream:
         param = yaml.safe_load(stream)
@@ -478,7 +482,6 @@ if __name__ == "__main__":
         model = {}
         for target_type in machine_types:
             if param['gt']:
-                print(eval_files)
                 train_dataset = AEGTDataset(train_files, param, target_source=target_type)
             else:
                 train_dataset = AEDataset(sep_model, train_files, param, target_source=target_type)
@@ -502,9 +505,7 @@ if __name__ == "__main__":
                 for batch in train_loader:
                     batch = batch.cuda()
                     pred = model[target_type](batch)
-                    print("pred:", pred.shape)
-                    print("batch:", batch.shape)
-                    loss = loss_fn(pred, batch)
+                    loss = loss_fn(pred[:, :320], batch[:, :320])
     
                     optimizer.zero_grad()
                     loss.backward()
@@ -532,6 +533,8 @@ if __name__ == "__main__":
                 sr, ys = file_to_wav_stereo(file_name)
                 active_labels = generate_label(ys)
                 active_labels_ = active_labels[:1, :].clone()
+                ys = ys[0, :]
+
             else:  
                 sr, mixture_y, y_raw, active_label_sources = eval_file_to_mixture_wav_label(file_name)
                 
@@ -569,7 +572,7 @@ if __name__ == "__main__":
             data = numpy.concatenate((data, control_spec_stack), axis = 1)
                     
             data = torch.Tensor(data).cuda()
-            error = torch.mean(((data - model[machine_type](data)) ** 2), dim=1)
+            error = torch.mean(((data[:, :320] - model[machine_type](data)[:, :320]) ** 2), dim=1)
 
             y_pred[num] = torch.mean(error).detach().cpu().numpy()
             eval_types[machine_type].append(num)
@@ -584,7 +587,7 @@ if __name__ == "__main__":
             logger.info("AUC_{} : {}".format(machine_type, score))
             evaluation_result["AUC_{}".format(machine_type)] = float(score)
             scores.append(score)
-            if param['gt']:
+            if not param['gt']:
                 logger.info("SDR_normal_{} : {}".format(machine_type, sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type])))
                 logger.info("SDR_abnormal_{} : {}".format(machine_type, sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type])))
                 evaluation_result["SDR_normal_{}".format(machine_type)] = float(sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type]))
