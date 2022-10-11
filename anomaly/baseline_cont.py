@@ -12,6 +12,7 @@
 import os
 import sys
 import glob
+import random
 ########################################################################
 
 
@@ -29,6 +30,7 @@ from sklearn import metrics
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from utils import *
 from model import TorchModel
@@ -40,12 +42,25 @@ from model import TorchModel
 ########################################################################
 __versions__ = "1.0.3"
 ########################################################################
-
-
+MACHINE = 'valve'
 
 ########################################################################
 # feature extractor
 ########################################################################
+
+def generate_label(y):
+    rms_fig = librosa.feature.rms(y)
+    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
+    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+
+    if MACHINE == 'valve':
+        k = int(y.shape[1]*0.8)
+        min_threshold, _ = torch.kthvalue(rms_trim, k)
+    else:
+        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
+    label = (rms_trim > min_threshold).type(torch.float)
+    label = label.expand(y.shape[0], -1)
+    return label
 
 def list_to_spec_vector_array(file_list,
                          msg="calc...",
@@ -87,6 +102,53 @@ def list_to_spec_vector_array(file_list,
     return dataset
 
 
+def train_list_to_gt_spec_vector_array(file_list,
+                         msg="calc...",
+                         n_mels=64,
+                         frames=5,
+                         n_fft=1024,
+                         hop_length=512,
+                         power=2.0,
+                         sep_model=None,
+                         target_source=None):
+
+    # 01 calculate the number of dimensions
+    dims = n_mels * frames
+
+    # 02 loop of file_to_vectorarray
+    for idx in tqdm(range(len(file_list)), desc=msg):
+        machine_type = os.path.split(os.path.split(os.path.split(file_list[idx])[0])[0])[1]
+        
+        sr, y = file_to_wav_stereo(file_list[idx])
+        active_labels = generate_label(y)
+        
+        vector_array = wav_to_spec_vector_array(sr, y[0, :],
+                                            n_mels=n_mels,
+                                            frames=frames,
+                                            n_fft=n_fft,
+                                            hop_length=hop_length,
+                                            power=power)   # (309, 320) = (time, n_mels*frames)
+        
+           
+        # convert active labels in wav domain to spectrogram domain
+        Tb = vector_array.shape[0] + frames - 1
+        active_labels_ = active_labels[:1, :].clone()
+        control_spec = F.adaptive_max_pool1d(active_labels_, output_size=Tb) # (1, 313)
+        control_spec_stack = numpy.zeros((vector_array.shape[0], frames), float) #(309, 5)
+        for t in range(frames):
+            control_spec_stack[:, t:(t + 1)] = control_spec[:, t: t + vector_array.shape[0]].T  # (309, 1) 
+       
+        # concat audio and activity labels
+        vector_array = numpy.concatenate((vector_array, control_spec_stack), axis = 1)
+
+        if idx == 0:
+            dataset = numpy.zeros((vector_array.shape[0] * len(file_list), dims + frames), float)
+          
+        dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :] = vector_array
+
+    return dataset
+
+
 class AEDataset(torch.utils.data.Dataset):
     def __init__(self, 
             file_list,
@@ -104,6 +166,33 @@ class AEDataset(torch.utils.data.Dataset):
                                             hop_length=param["feature"]["hop_length"],
                                             power=param["feature"]["power"],
                                             )
+        
+    
+    def __getitem__(self, index):
+        return torch.Tensor(self.data_vector[index, :])
+    
+    def __len__(self):
+        return self.data_vector.shape[0]
+
+
+class AEGTDataset(torch.utils.data.Dataset):
+    def __init__(self,  
+            file_list,
+            param,
+            target_source=None,
+            ):
+        
+        self.file_list = file_list
+        self.target_source = target_source
+
+        self.data_vector = train_list_to_gt_spec_vector_array(self.file_list,
+                                            msg="generate train_dataset",
+                                            n_mels=param["feature"]["n_mels"],
+                                            frames=param["feature"]["frames"],
+                                            n_fft=param["feature"]["n_fft"],
+                                            hop_length=param["feature"]["hop_length"],
+                                            power=param["feature"]["power"],
+                                            target_source=target_source)
         
     
     def __getitem__(self, index):
@@ -172,6 +261,15 @@ def dataset_generator(target_dir,
     return train_files, train_labels, eval_files, eval_labels
 
 
+def fix_seed(seed: int = 42):
+    random.seed(seed) # random
+    numpy.random.seed(seed) # numpy
+    os.environ["PYTHONHASHSEED"] = str(seed) 
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
+    torch.backends.cudnn.deterministic = True 
+    torch.backends.cudnn.benchmark = False
+
 ########################################################################
 
 
@@ -182,17 +280,15 @@ if __name__ == "__main__":
 
     # set gpu
     os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
-    os.environ["CUDA_VISIBLE_DEVICES"]= "5"  
+    os.environ["CUDA_VISIBLE_DEVICES"]= "4"  
+
 
     # load parameter yaml
     with open("baseline.yaml") as stream:
         param = yaml.safe_load(stream)
 
     # set random seed fixed
-    torch.manual_seed(param['seed'])
-    torch.cuda.manual_seed(param['seed']) 
-    torch.backends.cudnn.deterministic = True 
-    torch.backends.cudnn.benchmark = False
+    fix_seed(param['seed'])
 
     # make output directory
     os.makedirs(param["pickle_directory"], exist_ok=True)
@@ -260,7 +356,7 @@ if __name__ == "__main__":
             save_pickle(eval_files_pickle, eval_files)
             save_pickle(eval_labels_pickle, eval_labels)
 
-        train_dataset = AEDataset(train_files, param)
+        train_dataset = AEGTDataset(train_files, param)
         train_loader = torch.utils.data.DataLoader(
             train_dataset, batch_size=param["fit"]["batch_size"], shuffle=True,
         )
@@ -277,7 +373,7 @@ if __name__ == "__main__":
             for batch in train_loader:
                 batch = batch.cuda()
                 pred = model(batch)
-                loss = loss_fn(pred, batch)
+                loss = loss_fn(pred[:, :320], batch[:, :320])
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -293,15 +389,34 @@ if __name__ == "__main__":
         y_true = eval_labels
 
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
+
+            sr, ys = file_to_wav_stereo(file_name)
+            active_labels = generate_label(ys)
+            active_labels_ = active_labels[:1, :].clone()
+            ys = ys[0, :]
+            
             data = file_to_spec_vector_array(file_name,
                                         n_mels=param["feature"]["n_mels"],
                                         frames=param["feature"]["frames"],
                                         n_fft=param["feature"]["n_fft"],
                                         hop_length=param["feature"]["hop_length"],
                                         power=param["feature"]["power"])
+
+
+            # convert active labels in wav domain to spectrogram domain
+            frames = int(param["feature"]["frames"])
+            Tb = data.shape[0] + frames - 1
+            control_spec = F.adaptive_max_pool1d(active_labels_, output_size=Tb) # (1, 313)
+            control_spec_stack = numpy.zeros((data.shape[0], frames), float) #(309, 5)
+            for t in range(frames):
+                control_spec_stack[:, t:(t + 1)] = control_spec[:, t: t + data.shape[0]].T  # (309, 1) 
+
+            # concat audio and activity labels
+            data = numpy.concatenate((data, control_spec_stack), axis = 1)
             data = torch.Tensor(data).cuda()
-            error = torch.mean(((data - model(data)) ** 2), dim=1)
+            error = torch.mean(((data[:, :320] - model(data)[:, :320]) ** 2), dim=1)
             y_pred[num] = torch.mean(error).detach().cpu().numpy()
+
 
         # save model
         torch.save(model.state_dict(), model_file)

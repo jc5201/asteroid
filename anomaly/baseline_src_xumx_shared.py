@@ -14,6 +14,7 @@ import librosa.core
 import librosa.feature
 import yaml
 import logging
+import random
 
 from tqdm import tqdm
 from sklearn import metrics
@@ -42,9 +43,7 @@ __versions__ = "1.0.3"
 S1 = 'id_00'
 S2 = 'id_02'
 MACHINE = 'valve'
-FILE = 'valve_id00_02_gt.pth'
-
-
+FILE = 'valve_id00_02_shared.pth'
 
 ########################################################################
 
@@ -219,7 +218,7 @@ class AEDataset(torch.utils.data.Dataset):
     
     def __len__(self):
         return self.data_vector.shape[0]
-
+        
 
 def dataset_generator(target_dir,
                       normal_dir_name="normal",
@@ -295,6 +294,15 @@ def dataset_generator(target_dir,
     return train_files, train_labels, eval_files, eval_labels
 
 
+def fix_seed(seed: int = 42):
+    random.seed(seed) # random
+    numpy.random.seed(seed) # numpy
+    os.environ["PYTHONHASHSEED"] = str(seed) 
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
+    torch.backends.cudnn.deterministic = True 
+    torch.backends.cudnn.benchmark = False
+
 ########################################################################
 
 
@@ -307,6 +315,9 @@ if __name__ == "__main__":
     # load parameter yaml
     with open("baseline.yaml") as stream:
         param = yaml.safe_load(stream)
+    
+    # set random seed fixed
+    fix_seed(param['seed'])
 
     # make output directory
     os.makedirs(param["pickle_directory"], exist_ok=True)
@@ -383,9 +394,12 @@ if __name__ == "__main__":
             save_pickle(eval_files_pickle, eval_files)
             save_pickle(eval_labels_pickle, eval_labels)
         
-        
+
         for target_type in machine_types:
             train_dataset = AEDataset(sep_model, train_files, param, target_source=target_type)
+            print("\n\n\n")
+            print("*******************")
+            print(train_dataset.data_vector.shape)
             train_loader = torch.utils.data.DataLoader(
                 train_dataset, batch_size=param["fit"]["batch_size"], shuffle=True,
             )

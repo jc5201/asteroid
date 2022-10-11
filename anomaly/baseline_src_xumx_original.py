@@ -14,6 +14,7 @@ import librosa.core
 import librosa.feature
 import yaml
 import logging
+import random
 
 from tqdm import tqdm
 from sklearn import metrics
@@ -295,6 +296,15 @@ def dataset_generator(target_dir,
     return train_files, train_labels, eval_files, eval_labels
 
 
+def fix_seed(seed: int = 42):
+    random.seed(seed) # random
+    numpy.random.seed(seed) # numpy
+    os.environ["PYTHONHASHSEED"] = str(seed) 
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
+    torch.backends.cudnn.deterministic = True 
+    torch.backends.cudnn.benchmark = False
+
 ########################################################################
 
 
@@ -307,6 +317,9 @@ if __name__ == "__main__":
     # load parameter yaml
     with open("baseline.yaml") as stream:
         param = yaml.safe_load(stream)
+    
+    # set random seed fixed
+    fix_seed(param['seed'])
 
     # make output directory
     os.makedirs(param["pickle_directory"], exist_ok=True)
