@@ -44,8 +44,11 @@ S1 = 'id_00'
 S2 = 'id_02'
 MACHINE = 'valve'
 FILE = 'valve_conditioned_test1.pth'
+xumx_model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
+ae_path_base = '/hdd/hdd1/kjc/xumx/ae/cont'
 
-
+machine_types = [S1, S2]
+num_eval_normal = 250
 
 ########################################################################
 
@@ -56,7 +59,7 @@ FILE = 'valve_conditioned_test1.pth'
 
 
 def generate_label(y):
-    rms_fig = librosa.feature.rms(y)
+    rms_fig = librosa.feature.rms(y=y)
     rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
     rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
 
@@ -134,9 +137,6 @@ def xumx_model(path):
 
     return system.model
 
-
-machine_types = [S1, S2]
-num_eval_normal = 250
 
 
 def train_list_to_mix_sep_spec_vector_array(file_list,
@@ -372,14 +372,10 @@ if __name__ == "__main__":
                                                                           machine_id=machine_id,
                                                                           db=db)
    
-        
-        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
-
-        ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
+        ae_path = f'{ae_path_base}/{MACHINE}'
         os.makedirs(ae_path, exist_ok= True)
 
-        sep_model = xumx_model(model_path)
+        sep_model = xumx_model(xumx_model_path)
         sep_model.eval()
         sep_model = sep_model.cuda()
 

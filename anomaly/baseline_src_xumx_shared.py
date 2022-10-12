@@ -316,6 +316,10 @@ if __name__ == "__main__":
     with open("baseline.yaml") as stream:
         param = yaml.safe_load(stream)
     
+    # set gpu
+    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
+    os.environ["CUDA_VISIBLE_DEVICES"]= param['gpu']
+    
     # set random seed fixed
     fix_seed(param['seed'])
 
@@ -326,7 +330,7 @@ if __name__ == "__main__":
 
 
     # load base_directory list
-    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
+    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_04".format(base=param["base_directory"]))))
     # setup the result
     result_file = "{result}/{file_name}".format(result=param["result_directory"], file_name=param["result_file"])
     results = {}
@@ -371,8 +375,8 @@ if __name__ == "__main__":
                                                                           db=db)
    
         
-        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
+        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
+        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
 
         ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
         os.makedirs(ae_path, exist_ok= True)
@@ -394,42 +398,41 @@ if __name__ == "__main__":
             save_pickle(eval_files_pickle, eval_files)
             save_pickle(eval_labels_pickle, eval_labels)
         
+        
+        train_dataset = AEDataset(sep_model, train_files, param, target_source=machine_types[0])
+        train_dataset_ = AEDataset(sep_model, train_files, param, target_source=machine_types[1])
+        train_dataset.data_vector = numpy.concatenate((train_dataset.data_vector, train_dataset_.data_vector), axis = 0)
+      
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=param["fit"]["batch_size"], shuffle=True,
+        )
+        
+        os.makedirs(os.path.join(ae_path), exist_ok = True)
+        ae_path_target = os.path.join(ae_path, FILE)
 
-        for target_type in machine_types:
-            train_dataset = AEDataset(sep_model, train_files, param, target_source=target_type)
-            print("\n\n\n")
-            print("*******************")
-            print(train_dataset.data_vector.shape)
-            train_loader = torch.utils.data.DataLoader(
-                train_dataset, batch_size=param["fit"]["batch_size"], shuffle=True,
-            )
-            
-            os.makedirs(os.path.join(ae_path, target_type), exist_ok = True)
-            ae_path_target = os.path.join(ae_path, target_type, FILE)
+        # model training
+        print("============== MODEL TRAINING ==============")
+        dim_input = train_dataset.data_vector.shape[1]
+        model = TorchModel(dim_input).cuda()
+        
+        optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-2)
+        loss_fn = nn.MSELoss()
 
-            # model training
-            print("============== MODEL TRAINING ==============")
-            dim_input = train_dataset.data_vector.shape[1]
-            model = TorchModel(dim_input).cuda()
-            
-            optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-2)
-            loss_fn = nn.MSELoss()
+        for epoch in range(param["fit"]["epochs"]):
+            losses = []
+            for batch in train_loader:
+                batch = batch.cuda()
+                pred = model(batch)
+                loss = loss_fn(pred, batch)
 
-            for epoch in range(param["fit"]["epochs"]):
-                losses = []
-                for batch in train_loader:
-                    batch = batch.cuda()
-                    pred = model(batch)
-                    loss = loss_fn(pred, batch)
-    
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                    losses.append(loss.item())
-                if epoch % 10 == 0:
-                    print(f"epoch {epoch}: loss {sum(losses) / len(losses)}")
-            torch.save(model.state_dict(), ae_path_target)
-            model.eval()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                losses.append(loss.item())
+            if epoch % 10 == 0:
+                print(f"epoch {epoch}: loss {sum(losses) / len(losses)}")
+        torch.save(model.state_dict(), ae_path_target)
+        model.eval()
                
         # evaluation
         print("============== EVALUATION ==============")

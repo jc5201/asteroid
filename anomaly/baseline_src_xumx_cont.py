@@ -28,6 +28,15 @@ import museval
 
 from utils import *
 from model import TorchModel
+
+from baseline_src_xumx_original import (
+    generate_label,     
+    train_file_to_mixture_wav_label,
+    eval_file_to_mixture_wav_label,
+    XUMXSystem,
+    xumx_model,
+    dataset_generator,
+)
 ########################################################################
 
 
@@ -44,99 +53,14 @@ S1 = 'id_00'
 S2 = 'id_02'
 MACHINE = 'valve'
 FILE = 'valve_conditioned_test1.pth'
-
-
-
-########################################################################
-
-
-########################################################################
-# feature extractor
-########################################################################
-
-
-def generate_label(y):
-    rms_fig = librosa.feature.rms(y)
-    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
-
-    if MACHINE == 'valve':
-        k = int(y.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim, k)
-    else:
-        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
-    label = (rms_trim > min_threshold).type(torch.float)
-    label = label.expand(y.shape[0], -1)
-    return label
-
-def train_file_to_mixture_wav_label(filename):
-    machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
-    ys = 0
-    active_label_sources = {}
-    for machine in machine_types:
-        src_filename = filename.replace(machine_type, machine)
-        sr, y = file_to_wav_stereo(src_filename)
-        active_label_sources[machine] = generate_label(y)
-        ys = ys + y
-
-    return sr, ys, active_label_sources
-
-
-def eval_file_to_mixture_wav_label(filename):
-    machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
-    ys = 0
-    gt_wav = {}
-    active_label_sources = {}
-    for normal_type in machine_types:
-        if normal_type == machine_type:
-            src_filename = filename
-        else:
-            src_filename = filename.replace(machine_type, normal_type).replace('abnormal', 'normal')
-        sr, y = file_to_wav_stereo(src_filename)
-        ys = ys + y
-        active_label_sources[normal_type] = generate_label(y)
-        gt_wav[normal_type] = y
-    
-    return sr, ys, gt_wav, active_label_sources
-
-
-
-class XUMXSystem(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.model = None
-
-
-def xumx_model(path):
-    
-    x_unmix = XUMXControl(
-        window_length=4096,
-        input_mean=None,
-        input_scale=None,
-        nb_channels=2,
-        hidden_size=512,
-        in_chan=4096,
-        n_hop=1024,
-        sources=[S1, S2],
-        max_bin=bandwidth_to_max_bin(16000, 4096, 16000),
-        bidirectional=True,
-        sample_rate=16000,
-        spec_power=1,
-        return_time_signals=True,
-    )
-
-    conf = torch.load(path, map_location="cpu")
-
-    system = XUMXSystem()
-    system.model = x_unmix
-
-    system.load_state_dict(conf['state_dict'], strict=False)
-
-    return system.model
-
+xumx_model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
+ae_path_base = '/hdd/hdd1/kjc/xumx/ae/cont'
 
 machine_types = [S1, S2]
 num_eval_normal = 250
+
+########################################################################
+
 
 
 def train_list_to_mix_sep_spec_vector_array(file_list,
@@ -198,12 +122,12 @@ def train_list_to_mix_sep_spec_vector_array(file_list,
             control_spec_stack[:, t:(t + 1)] = control_spec[:, t: t + vector_array.shape[0]].T  # (309, 1) 
 
         # concat audio and activity labels
-        vector_array = numpy.concatenate((vector_array, control_spec_stack), axis = 1)
+        vector_control_array = numpy.concatenate((vector_array, control_spec_stack), axis = 1)
 
         if idx == 0:
             dataset = numpy.zeros((vector_array.shape[0] * len(file_list), dims + frames), float)
           
-        dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :] = vector_array
+        dataset[vector_array.shape[0] * idx: vector_array.shape[0] * (idx + 1), :] = vector_control_array
 
     return dataset
 
@@ -455,14 +379,10 @@ if __name__ == "__main__":
                                                                           machine_id=machine_id,
                                                                           db=db)
    
-        
-        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
-
-        ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
+        ae_path = f'{ae_path_base}/{MACHINE}'
         os.makedirs(ae_path, exist_ok= True)
 
-        sep_model = xumx_model(model_path)
+        sep_model = xumx_model(xumx_model_path)
         sep_model.eval()
         sep_model = sep_model.cuda()
 
@@ -573,6 +493,7 @@ if __name__ == "__main__":
                     
             data = torch.Tensor(data).cuda()
             error = torch.mean(((data[:, :320] - model[machine_type](data)[:, :320]) ** 2), dim=1)
+            
 
             y_pred[num] = torch.mean(error).detach().cpu().numpy()
             eval_types[machine_type].append(num)
