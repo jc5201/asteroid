@@ -2,8 +2,8 @@ base_directory : /dev/shm/mimii
 pickle_directory: ./pickle
 model_directory: ./model
 result_directory: ./result
-result_file: result.yaml
-gt: True
+result_file: slider_id00_02_original_seed3.yaml
+seed: 3
 
 feature:
   n_mels: 64

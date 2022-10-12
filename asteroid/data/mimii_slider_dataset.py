@@ -52,8 +52,8 @@ class MIMIISliderDataset(MIMIIValveDataset):
             use_control=use_control,
             task_random=task_random,
             source_random=source_random,
+            machine_type_dir = "slider"
         )
-        self.machine_type_dir = "slider"
 
 
     def generate_label(self, audio):

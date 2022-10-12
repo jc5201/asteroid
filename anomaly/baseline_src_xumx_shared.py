@@ -42,8 +42,13 @@ __versions__ = "1.0.3"
 # choose machine type and id
 S1 = 'id_00'
 S2 = 'id_02'
-MACHINE = 'valve'
-FILE = 'valve_id00_02_shared.pth'
+MACHINE = 'slider'
+FILE = 'slider_id00_id02_shared.pth'
+model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_slider2/checkpoints/epoch=998-step=66932.ckpt'
+ae_path_base = '/hdd/hdd1/lyj/xumx/ae/cont'
+
+machine_types = [S1, S2]
+num_eval_normal = 250
 
 ########################################################################
 
@@ -54,7 +59,7 @@ FILE = 'valve_id00_02_shared.pth'
 
 
 def generate_label(y):
-    rms_fig = librosa.feature.rms(y)
+    rms_fig = librosa.feature.rms(y=y)
     rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
     rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
 
@@ -115,7 +120,7 @@ def xumx_model(path):
         hidden_size=512,
         in_chan=4096,
         n_hop=1024,
-        sources=[S1, S2],
+        sources=['s1', 's2'],
         max_bin=bandwidth_to_max_bin(16000, 4096, 16000),
         bidirectional=True,
         sample_rate=16000,
@@ -131,10 +136,6 @@ def xumx_model(path):
     system.load_state_dict(conf['state_dict'], strict=False)
 
     return system.model
-
-
-machine_types = [S1, S2]
-num_eval_normal = 250
 
 
 def train_list_to_mix_sep_spec_vector_array(file_list,
@@ -315,11 +316,7 @@ if __name__ == "__main__":
     # load parameter yaml
     with open("baseline.yaml") as stream:
         param = yaml.safe_load(stream)
-    
-    # set gpu
-    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
-    os.environ["CUDA_VISIBLE_DEVICES"]= param['gpu']
-    
+        
     # set random seed fixed
     fix_seed(param['seed'])
 
@@ -330,7 +327,7 @@ if __name__ == "__main__":
 
 
     # load base_directory list
-    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_04".format(base=param["base_directory"]))))
+    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/{machine}/{source}".format(base=param["base_directory"], machine = MACHINE, source = S1))))
     # setup the result
     result_file = "{result}/{file_name}".format(result=param["result_directory"], file_name=param["result_file"])
     results = {}
@@ -375,7 +372,7 @@ if __name__ == "__main__":
                                                                           db=db)
    
         
-        model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
+        #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve_id46_test2/checkpoints/epoch=935-step=58031.ckpt'
         #model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
 
         ae_path = '/hdd/hdd1/lyj/xumx/ae/cont/{machine}'.format(machine = MACHINE)
@@ -442,7 +439,10 @@ if __name__ == "__main__":
         sdr_pred_abnormal = {mt: [] for mt in machine_types}
 
         eval_types = {mt: [] for mt in machine_types}
-        
+               
+        for file in eval_files:
+            print(file)
+            
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
             machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
             target_idx = machine_types.index(machine_type)  

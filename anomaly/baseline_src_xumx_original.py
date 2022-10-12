@@ -42,10 +42,10 @@ __versions__ = "1.0.3"
 # choose machine type and id
 S1 = 'id_00'
 S2 = 'id_02'
-MACHINE = 'valve'
-FILE = 'valve_conditioned_test1.pth'
-xumx_model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_valve2/checkpoints/epoch=998-step=44954.ckpt'
-ae_path_base = '/hdd/hdd1/kjc/xumx/ae/cont'
+MACHINE = 'slider'
+FILE = 'slider_id00_id02_original.pth'
+xumx_model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_slider2/checkpoints/epoch=998-step=66932.ckpt'
+ae_path_base = '/hdd/hdd1/lyj/xumx/ae/cont'
 
 machine_types = [S1, S2]
 num_eval_normal = 250
@@ -120,7 +120,7 @@ def xumx_model(path):
         hidden_size=512,
         in_chan=4096,
         n_hop=1024,
-        sources=[S1, S2],
+        sources=['s1', 's2'],
         max_bin=bandwidth_to_max_bin(16000, 4096, 16000),
         bidirectional=True,
         sample_rate=16000,
@@ -320,7 +320,7 @@ if __name__ == "__main__":
     
     # set random seed fixed
     fix_seed(param['seed'])
-
+    
     # make output directory
     os.makedirs(param["pickle_directory"], exist_ok=True)
     os.makedirs(param["model_directory"], exist_ok=True)
@@ -328,7 +328,7 @@ if __name__ == "__main__":
 
 
     # load base_directory list
-    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))
+    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/{machine}/{source}".format(base=param["base_directory"], machine = MACHINE, source = S1))))
     # setup the result
     result_file = "{result}/{file_name}".format(result=param["result_directory"], file_name=param["result_file"])
     results = {}
@@ -435,6 +435,9 @@ if __name__ == "__main__":
 
         eval_types = {mt: [] for mt in machine_types}
         
+        for file in eval_files:
+            print(file)
+            
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
             machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
             target_idx = machine_types.index(machine_type)  

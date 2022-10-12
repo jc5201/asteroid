@@ -88,6 +88,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         use_control=False,
         task_random = False,
         source_random = False,
+        machine_type_dir = "valve",
     ):
 
         self.root = Path(root).expanduser()
@@ -107,7 +108,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         self.use_control = use_control 
         self.normal = True
         self.task_random = task_random
-        self.machine_type_dir = "valve"
+        self.machine_type_dir = machine_type_dir
 
         self.tracks = list(self.get_tracks())
         if not self.tracks:
