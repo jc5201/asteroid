@@ -19,6 +19,7 @@ import glob
 # import additional python-library
 ########################################################################
 import numpy
+import numpy as np
 import librosa
 import librosa.core
 import librosa.feature
@@ -41,12 +42,29 @@ from model import TorchModel
 __versions__ = "1.0.3"
 ########################################################################
 
-machine_types = ['id_00', 'id_02']
+S1 = 'id_00'
+S2 = 'id_02'
+MACHINE = 'valve'
+machine_types = [S1, S2]
 num_eval_normal = 250
 
 ########################################################################
 # feature extractor
 ########################################################################
+
+def generate_label(y):
+    rms_fig = librosa.feature.rms(y=y)
+    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
+    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+
+    if MACHINE == 'valve':
+        k = int(y.shape[1]*0.8)
+        min_threshold, _ = torch.kthvalue(rms_trim, k)
+    else:
+        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
+    label = (rms_trim > min_threshold).type(torch.float)
+    label = label.expand(y.shape[0], -1)
+    return label
 
 def train_file_to_mixture_wav(filename):
     machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
@@ -71,6 +89,25 @@ def eval_file_to_mixture_wav(filename):
     
     return sr, ys
 
+def eval_file_to_mixture_wav_label(filename):
+    machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
+    ys = 0
+    gt_wav = {}
+    active_label_sources = {}
+    for normal_type in machine_types:
+        if normal_type == machine_type:
+            src_filename = filename
+        else:
+            src_filename = filename.replace(machine_type, normal_type).replace('abnormal', 'normal')
+        sr, y = demux_wav(src_filename)
+        ys = ys + y
+        active_label_sources[normal_type] = generate_label(np.expand_dims(y, axis=0))
+        gt_wav[normal_type] = y
+    
+    return sr, ys, gt_wav, active_label_sources
+
+def get_overlap_ratio(signal1, signal2):
+    return torch.sum(torch.logical_and(signal1, signal2)) / torch.sum(torch.logical_or(signal1, signal2))
 
 def train_list_to_mixture_spec_vector_array(file_list,
                          msg="calc...",
@@ -222,11 +259,8 @@ if __name__ == "__main__":
     os.makedirs(param["model_directory"], exist_ok=True)
     os.makedirs(param["result_directory"], exist_ok=True)
 
-    # initialize the visualizer
-    visualizer = visualizer()
-
     # load base_directory list
-    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/id_00".format(base=param["base_directory"]))))  # {base}/0dB/fan/id_00/normal/00000000.wav
+    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/{machine}/{source}".format(base=param["base_directory"], machine = MACHINE, source = S1))))  # {base}/0dB/fan/id_00/normal/00000000.wav
 
     # setup the result
     result_file = "{result}/{file_name}".format(result=param["result_directory"], file_name=param["result_file"])
@@ -271,12 +305,12 @@ if __name__ == "__main__":
 
         # dataset generator
         print("============== DATASET_GENERATOR ==============")
-        if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
-            train_files= load_pickle(train_pickle)
-            eval_files = load_pickle(eval_files_pickle)
-            eval_labels = load_pickle(eval_labels_pickle)
-        else:
-            train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
+        # if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
+        #     train_files= load_pickle(train_pickle)
+        #     eval_files = load_pickle(eval_files_pickle)
+        #     eval_labels = load_pickle(eval_labels_pickle)
+        # else:
+        train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
 
         train_dataset = AEDatasetMix(train_files, param)
         train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=param["fit"]["batch_size"], shuffle=True)
@@ -313,32 +347,38 @@ if __name__ == "__main__":
         y_true = numpy.array(eval_labels)
 
         eval_types = {mt: [] for mt in machine_types}
+        overlap_log = []
     
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
-            try:
-                machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
+            machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
 
-                sr, ys = eval_file_to_mixture_wav(file_name)
+            sr, ys, y_raw, active_label_sources = eval_file_to_mixture_wav_label(file_name)
+            overlap_ratio = get_overlap_ratio(active_label_sources[machine_types[0]], active_label_sources[machine_types[1]])
 
-                data = wav_to_spec_vector_array(sr, ys,
-                                            n_mels=param["feature"]["n_mels"],
-                                            frames=param["feature"]["frames"],
-                                            n_fft=param["feature"]["n_fft"],
-                                            hop_length=param["feature"]["hop_length"],
-                                            power=param["feature"]["power"])
+            data = wav_to_spec_vector_array(sr, ys,
+                                        n_mels=param["feature"]["n_mels"],
+                                        frames=param["feature"]["frames"],
+                                        n_fft=param["feature"]["n_fft"],
+                                        hop_length=param["feature"]["hop_length"],
+                                        power=param["feature"]["power"])
 
-                data = torch.Tensor(data).cuda()
-                error = torch.mean(((data - model(data)) ** 2), dim=1)
-                y_pred[num] = torch.mean(error).detach().cpu().numpy()
-                
-                if num < num_eval_normal:
-                    for mt in machine_types:
-                        eval_types[mt].append(num)
-                else:
-                    eval_types[machine_type].append(num)
-            except:
-                logger.warning("File broken!!: {}".format(file_name))
+            data = torch.Tensor(data).cuda()
+            error = torch.mean(((data - model(data)) ** 2), dim=1)
+            y_pred[num] = torch.mean(error).detach().cpu().numpy()
 
+            overlap_log.append(['normal' if num < num_eval_normal else 'abnormal',
+                    y_pred[num].item(0), 
+                    torch.max(error).detach().cpu().item(), 
+                    overlap_ratio])
+            
+            if num < num_eval_normal:
+                for mt in machine_types:
+                    eval_types[mt].append(num)
+            else:
+                eval_types[machine_type].append(num)
+
+        with open('mix.pkl', 'wb') as f:
+            pickle.dump(overlap_log, f)
         scores = []
         for machine_type in machine_types:
             score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred[eval_types[machine_type]])
