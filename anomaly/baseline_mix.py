@@ -44,7 +44,7 @@ __versions__ = "1.0.3"
 
 S1 = 'id_00'
 S2 = 'id_02'
-MACHINE = 'valve'
+MACHINE = 'slider'
 machine_types = [S1, S2]
 num_eval_normal = 250
 
@@ -212,7 +212,7 @@ def dataset_generator(target_dir,
                                                                  normal_dir_name=normal_dir_name,
                                                                  ext=ext))))
     normal_len = [len(glob.glob(
-        os.path.abspath("{dir}/{normal_dir_name}/*.{ext}".format(dir=target_dir.replace('id_00', mt),
+        os.path.abspath("{dir}/{normal_dir_name}/*.{ext}".format(dir=target_dir.replace(S1, mt),
                                                                  normal_dir_name=normal_dir_name,
                                                                  ext=ext)))) for mt in machine_types]
     normal_len = min(min(normal_len), len(normal_files))
@@ -226,7 +226,7 @@ def dataset_generator(target_dir,
     abnormal_files = []
     for machine_type in machine_types:
         abnormal_files.extend(sorted(glob.glob(
-            os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir.replace('id_00', machine_type),
+            os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir.replace(S1, machine_type),
                                                                  abnormal_dir_name=abnormal_dir_name,
                                                                  ext=ext)))))         
 
@@ -343,7 +343,8 @@ if __name__ == "__main__":
 
         # evaluation
         print("============== EVALUATION ==============")
-        y_pred = numpy.array([0. for k in eval_labels])
+        y_pred_mean = numpy.array([0. for k in eval_labels])
+        y_pred_max = numpy.array([0. for k in eval_labels])
         y_true = numpy.array(eval_labels)
 
         eval_types = {mt: [] for mt in machine_types}
@@ -364,12 +365,16 @@ if __name__ == "__main__":
 
             data = torch.Tensor(data).cuda()
             error = torch.mean(((data - model(data)) ** 2), dim=1)
-            y_pred[num] = torch.mean(error).detach().cpu().numpy()
+            y_pred_mean[num] = torch.mean(error).detach().cpu().numpy()
+            y_pred_max[num] = torch.max(error).detach().cpu().numpy()
 
-            overlap_log.append(['normal' if num < num_eval_normal else 'abnormal',
-                    y_pred[num].item(0), 
+            overlap_log.append([
+                    'normal' if num < num_eval_normal else 'abnormal',
+                    machine_type,
+                    torch.mean(error).detach().cpu().item(), 
                     torch.max(error).detach().cpu().item(), 
-                    overlap_ratio])
+                    overlap_ratio.item()
+                    ])
             
             if num < num_eval_normal:
                 for mt in machine_types:
@@ -377,17 +382,25 @@ if __name__ == "__main__":
             else:
                 eval_types[machine_type].append(num)
 
-        with open('mix.pkl', 'wb') as f:
+        with open('overlap_mix.pkl', 'wb') as f:
             pickle.dump(overlap_log, f)
-        scores = []
+        mean_scores = []
+        max_scores = []
         for machine_type in machine_types:
-            score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred[eval_types[machine_type]])
-            logger.info("AUC_{} : {}".format(machine_type, score))
-            evaluation_result["AUC_{}".format(machine_type)] = float(score)
-            scores.append(score)
-        score = sum(scores) / len(scores)
-        logger.info("AUC : {}".format(score))
-        evaluation_result["AUC"] = float(score)
+            mean_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_mean[eval_types[machine_type]])
+            max_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_max[eval_types[machine_type]])
+            logger.info("AUC_mean_{} : {}".format(machine_type, mean_score))
+            logger.info("AUC_max_{} : {}".format(machine_type, max_score))
+            evaluation_result["AUC_mean_{}".format(machine_type)] = float(mean_score)
+            evaluation_result["AUC_max_{}".format(machine_type)] = float(max_score)
+            mean_scores.append(mean_score)
+            max_scores.append(max_score)
+        mean_score = sum(mean_scores) / len(mean_scores)
+        max_score = sum(max_scores) / len(max_scores)
+        logger.info("AUC_mean : {}".format(mean_score))
+        logger.info("AUC_max : {}".format(max_score))
+        evaluation_result["AUC_mean"] = float(mean_score)
+        evaluation_result["AUC_max"] = float(max_score)
         results[evaluation_result_key] = evaluation_result
         print("===========================")
 
