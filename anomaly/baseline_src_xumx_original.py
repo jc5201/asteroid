@@ -40,11 +40,11 @@ __versions__ = "1.0.3"
 
 ########################################################################
 # choose machine type and id
-S1 = 'id_00'
-S2 = 'id_02'
+S1 = 'id_04'
+S2 = 'id_06'
 MACHINE = 'slider'
-FILE = 'slider_id00_id02_original.pth'
-xumx_model_path = '/hdd/hdd1/lyj/xumx/output_w_cont_slider2/checkpoints/epoch=998-step=66932.ckpt'
+FILE = 'slider_id04_id06_original.pth'
+xumx_model_path = '/hdd/hdd1/sss/xumx/1012_slider_id04_06_test2/checkpoints/epoch=769-step=51589.ckpt'
 ae_path_base = '/hdd/hdd1/lyj/xumx/ae/cont'
 
 machine_types = [S1, S2]
@@ -120,7 +120,7 @@ def xumx_model(path):
         hidden_size=512,
         in_chan=4096,
         n_hop=1024,
-        sources=['s1', 's2'],
+        sources=[S1, S2],
         max_bin=bandwidth_to_max_bin(16000, 4096, 16000),
         bidirectional=True,
         sample_rate=16000,
@@ -434,9 +434,6 @@ if __name__ == "__main__":
         sdr_pred_abnormal = {mt: [] for mt in machine_types}
 
         eval_types = {mt: [] for mt in machine_types}
-        
-        for file in eval_files:
-            print(file)
             
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
             machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
