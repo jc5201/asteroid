@@ -182,10 +182,12 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         if self.task_random:
             targets = target_tmp.copy()
             random.shuffle(targets)       
+            if len(targets) > 2:
+                targets = targets[:2]
         else:
             targets = target_tmp
         audioes = torch.stack([audio_sources[src] for src in targets])
-        audio_mix = torch.stack([audioes[i, 0:2, :] for i in range(len(sources_tmp))]).sum(0)
+        audio_mix = torch.stack([audioes[i, 0:2, :] for i in range(len(targets))]).sum(0)
 
         #use different channel for two different valves
         if targets:
