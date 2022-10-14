@@ -66,6 +66,7 @@ def load_datasets(parser, args):
         use_control=args.use_control,
         task_random=args.task_random,
         source_random=args.source_random,
+        num_src_in_mix=args.num_src_in_mix,
         **dataset_kwargs,
     )
 
