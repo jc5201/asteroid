@@ -32,10 +32,13 @@ data:
   sources:
     - id_00
     - id_02
+    - id_04
+    - id_06
   use_control: True
   control_type: rms
-  task_random: True
-  source_random: False
+  task_random: False
+  source_random: True
+  num_src_in_mix: 3
 # Network config
 model:
   pretrained: null

@@ -164,11 +164,11 @@ class XUMXManager(System):
                 mix_audio = mixture.clone()
                 mixture = mixture.repeat(n_src, 1, 1)
 
-                sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
+                # sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
                 sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
 
                 sdr_tmp += np.mean(sdr, axis=1)
-                sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
+                # sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
 
             if batch_tmp[0].shape[-1] < dur_samples or batch[0].shape[-1] == cnt * dur_samples:
                 break
@@ -177,10 +177,10 @@ class XUMXManager(System):
 
         if self.current_epoch % 10 == 0:
             sdr = sdr_tmp / cnt
-            sdri = sdri_tmp / cnt
+            # sdri = sdri_tmp / cnt
             for i, src in enumerate(self.model.sources): 
                 self.log(f"val_SDR_{src}", sdr[i], on_epoch=True, prog_bar=True)
-                self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
+                # self.log(f"val_SDRi_{src}", sdri[i], on_epoch=True, prog_bar=True)
 
             if batch_nb % 8 == 0:
                 valve1_hat = np.array(time_hat[0, :, 0].reshape(-1,1).detach().cpu())
@@ -200,7 +200,7 @@ class XUMXManager(System):
                 })
                 
             self.log("val_mean_SDR", np.mean(sdr), on_epoch=True, prog_bar=True)
-            self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
+            # self.log("val_mean_SDRi", np.mean(sdri), on_epoch=True, prog_bar=True)
 
 
 class XUMXControlManager(XUMXManager):
@@ -353,7 +353,7 @@ def main(conf, args):
             hidden_size=args.hidden_size,
             in_chan=args.in_chan,
             n_hop=args.nhop,
-            sources=['s1', 's2'],  #sources=args.sources,
+            sources=['s1', 's2', 's3', 's4'][:args.num_src_in_mix],  #sources=args.sources,
             max_bin=max_bin,
             bidirectional=args.bidirectional,
             sample_rate=train_dataset.sample_rate,
@@ -369,7 +369,7 @@ def main(conf, args):
             hidden_size=args.hidden_size,
             in_chan=args.in_chan,
             n_hop=args.nhop,
-            sources=['s1', 's2'], #sources=args.sources,
+            sources=['s1', 's2', 's3', 's4'][:args.num_src_in_mix], #sources=args.sources,
             max_bin=max_bin,
             bidirectional=args.bidirectional,
             sample_rate=train_dataset.sample_rate,

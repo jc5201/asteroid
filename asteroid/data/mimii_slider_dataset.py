@@ -32,8 +32,9 @@ class MIMIISliderDataset(MIMIIValveDataset):
         sample_rate=16000,
         normal=True,
         use_control=False,
-        task_random = False,
-        source_random = False,
+        task_random=False,
+        source_random=False,
+        num_src_in_mix=2,
     ):
 
         super().__init__(root, 
@@ -52,7 +53,8 @@ class MIMIISliderDataset(MIMIIValveDataset):
             use_control=use_control,
             task_random=task_random,
             source_random=source_random,
-            machine_type_dir = "slider"
+            num_src_in_mix=num_src_in_mix,
+            machine_type_dir="slider"
         )
 
 

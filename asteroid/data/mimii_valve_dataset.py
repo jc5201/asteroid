@@ -88,6 +88,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         use_control=False,
         task_random = False,
         source_random = False,
+        num_src_in_mix = 2,
         machine_type_dir = "valve",
     ):
 
@@ -105,6 +106,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         self.samples_per_track = samples_per_track
         self.normal = normal
         self.source_random = source_random
+        self.num_src_in_mix = num_src_in_mix
         self.use_control = use_control 
         self.normal = True
         self.task_random = task_random
@@ -120,7 +122,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         active_label_sources = {}
 
         if self.source_random:
-            sources_tmp = ["src1", "src2"]
+            sources_tmp = ["src1", "src2", "src3", "src4"][:self.num_src_in_mix]
             target_tmp = sources_tmp
         else:
             sources_tmp = self.sources
@@ -182,17 +184,15 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         if self.task_random:
             targets = target_tmp.copy()
             random.shuffle(targets)       
-            if len(targets) > 2:
-                targets = targets[:2]
+            if len(targets) > self.num_src_in_mix:
+                targets = targets[:self.num_src_in_mix]
         else:
             targets = target_tmp
         audioes = torch.stack([audio_sources[src] for src in targets])
         audio_mix = torch.stack([audioes[i, 0:2, :] for i in range(len(targets))]).sum(0)
 
-        #use different channel for two different valves
         if targets:
             audio_sources = audioes[:, 0:2, :]
-            #audio_sources[1, :, :] = audioes[1, 2:4, :]
 
         if self.use_control:
             active_labels = torch.stack([active_label_sources[src] for src in targets])
