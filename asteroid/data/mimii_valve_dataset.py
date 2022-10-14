@@ -204,8 +204,10 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         return audio_mix, audio_sources
 
     def generate_label(self, audio):
-        # np, [1, 313]
-        rms_fig = librosa.feature.rms(y=audio.numpy()) #[1, 313]
+        # np, [c, t]
+        rms_fig = librosa.feature.rms(y=audio.numpy()) 
+        #[c, 1, 313]
+
         rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
         # [channel, time, 1]
         rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]

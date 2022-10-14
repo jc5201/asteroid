@@ -26,10 +26,6 @@ def load_datasets(parser, args):
         [globals()["_augment_" + aug] for aug in args.source_augmentations]
     )
 
-    # if args.machine_type == 'conveyer':
-    #     Dataset = ConveyerDataset
-    #     validation_tracks = ["Track002", "Track003", "Track004", "Track005"]
-    # else:
     if args.machine_type == 'valve':
         Dataset = MIMIIValveDataset
         validation_tracks = validation_tracks = ["00000000", "00000001","00000002", "00000003"]
@@ -53,8 +49,6 @@ def load_datasets(parser, args):
         use_control=args.use_control,
         task_random=args.task_random,
         source_random=args.source_random,
-        # machine_type = args.machine_type,         # for conveyor
-        # control_type = args.control_type,
         **dataset_kwargs,
     )
     
@@ -71,8 +65,6 @@ def load_datasets(parser, args):
         use_control=args.use_control,
         task_random=args.task_random,
         source_random=args.source_random,
-        # machine_type = args.machine_type,         # for conveyor
-        # control_type = args.control_type,
         **dataset_kwargs,
     )
 
