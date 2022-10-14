@@ -205,20 +205,19 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
 
     def generate_label(self, audio):
         # np, [c, t]
+        channels = audio.shape[0]
         rms_fig = librosa.feature.rms(y=audio.numpy()) 
         #[c, 1, 313]
 
-        rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
+        rms_tensor = torch.tensor(rms_fig).permute(0, 2, 1)
         # [channel, time, 1]
-        rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+        rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
         # [channel, time]
 
         k = int(audio.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim, k)
+        min_threshold, _ = torch.kthvalue(rms_trim[0, :], k)
 
         label = (rms_trim > min_threshold).type(torch.float) 
-        # label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
-        label = label.expand(audio.shape[0], -1)
         #[channel, time]
         return label
 

@@ -53,17 +53,24 @@ num_eval_normal = 250
 ########################################################################
 
 def generate_label(y):
-    rms_fig = librosa.feature.rms(y=y)
-    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+    # np, [c, t]
+    channels = y.shape[0]
+    rms_fig = librosa.feature.rms(y=y) 
+    #[c, 1, 313]
+
+    rms_tensor = torch.tensor(rms_fig).permute(0, 2, 1)
+    # [channel, time, 1]
+    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
+    # [channel, time]
 
     if MACHINE == 'valve':
         k = int(y.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim, k)
+        min_threshold, _ = torch.kthvalue(rms_trim[0, :], k)
     else:
         min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
-    label = (rms_trim > min_threshold).type(torch.float)
-    label = label.expand(y.shape[0], -1)
+
+    label = (rms_trim > min_threshold).type(torch.float) 
+    #[channel, time]
     return label
 
 def train_file_to_mixture_wav(filename):

@@ -9,6 +9,7 @@ import sys
 import glob
 
 import numpy
+import numpy as np
 import librosa
 import librosa.core
 import librosa.feature
@@ -59,17 +60,24 @@ num_eval_normal = 250
 
 
 def generate_label(y):
+        # np, [c, t]
+        channels = y.shape[0]
     rms_fig = librosa.feature.rms(y=y)
-    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+        #[c, 1, 313]
+
+        rms_tensor = torch.tensor(rms_fig).permute(0, 2, 1)
+        # [channel, time, 1]
+        rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
+        # [channel, time]
 
     if MACHINE == 'valve':
         k = int(y.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim, k)
+            min_threshold, _ = torch.kthvalue(rms_trim[0, :], k)
     else:
         min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
+    
     label = (rms_trim > min_threshold).type(torch.float)
-    label = label.expand(y.shape[0], -1)
+        #[channel, time]
     return label
 
 def train_file_to_mixture_wav_label(filename):
@@ -375,11 +383,11 @@ if __name__ == "__main__":
                                                                           db=db)
    
         ae_path = f'{ae_path_base}/{MACHINE}'
-        os.makedirs(ae_path, exist_ok= True)
+        os.makedirs(ae_path, exist_ok=True)
 
         sep_model = xumx_model(xumx_model_path)
-        sep_model.eval()
         sep_model = sep_model.cuda()
+        sep_model.eval()
 
 
         # dataset generator
