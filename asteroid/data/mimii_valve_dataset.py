@@ -88,6 +88,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         use_control=False,
         task_random = False,
         source_random = False,
+        num_src_in_mix = 2,
         machine_type_dir = "valve",
     ):
 
@@ -105,6 +106,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         self.samples_per_track = samples_per_track
         self.normal = normal
         self.source_random = source_random
+        self.num_src_in_mix = num_src_in_mix
         self.use_control = use_control 
         self.normal = True
         self.task_random = task_random
@@ -120,7 +122,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         active_label_sources = {}
 
         if self.source_random:
-            sources_tmp = ["src1", "src2"]
+            sources_tmp = ["src1", "src2", "src3", "src4"][:self.num_src_in_mix]
             target_tmp = sources_tmp
         else:
             sources_tmp = self.sources
@@ -182,15 +184,15 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         if self.task_random:
             targets = target_tmp.copy()
             random.shuffle(targets)       
+            if len(targets) > self.num_src_in_mix:
+                targets = targets[:self.num_src_in_mix]
         else:
             targets = target_tmp
         audioes = torch.stack([audio_sources[src] for src in targets])
-        audio_mix = torch.stack([audioes[i, 0:2, :] for i in range(len(sources_tmp))]).sum(0)
+        audio_mix = torch.stack([audioes[i, 0:2, :] for i in range(len(targets))]).sum(0)
 
-        #use different channel for two different valves
         if targets:
             audio_sources = audioes[:, 0:2, :]
-            #audio_sources[1, :, :] = audioes[1, 2:4, :]
 
         if self.use_control:
             active_labels = torch.stack([active_label_sources[src] for src in targets])
@@ -202,19 +204,20 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         return audio_mix, audio_sources
 
     def generate_label(self, audio):
-        # np, [1, 313]
-        rms_fig = librosa.feature.rms(y=audio.numpy()) #[1, 313]
-        rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
+        # np, [c, t]
+        channels = audio.shape[0]
+        rms_fig = librosa.feature.rms(y=audio.numpy()) 
+        #[c, 1, 313]
+
+        rms_tensor = torch.tensor(rms_fig).permute(0, 2, 1)
         # [channel, time, 1]
-        rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+        rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
         # [channel, time]
 
         k = int(audio.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim, k)
+        min_threshold, _ = torch.kthvalue(rms_trim[0, :], k)
 
         label = (rms_trim > min_threshold).type(torch.float) 
-        # label = torch.as_tensor([0.0 if j < min_threshold else 1.0 for j in rms_trim[0, :]])
-        label = label.expand(audio.shape[0], -1)
         #[channel, time]
         return label
 

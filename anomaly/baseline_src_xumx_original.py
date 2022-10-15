@@ -9,6 +9,7 @@ import sys
 import glob
 
 import numpy
+import numpy as np
 import librosa
 import librosa.core
 import librosa.feature
@@ -44,8 +45,10 @@ S1 = 'id_04'
 S2 = 'id_06'
 MACHINE = 'slider'
 FILE = 'slider_id04_id06_original.pth'
-xumx_model_path = '/hdd/hdd1/sss/xumx/1012_slider_id04_06_test2/checkpoints/epoch=769-step=51589.ckpt'
-ae_path_base = '/hdd/hdd1/lyj/xumx/ae/cont'
+xumx_slider_model_path = '/hdd/hdd1/sss/xumx/1013_9_slider0246_fix_control/checkpoints/epoch=198-step=3382.ckpt'
+xumx_valve_model_path = '/hdd/hdd1/sss/xumx/1013_8_valve0248_fix_control/checkpoints/epoch=214-step=4944.ckpt'
+xumx_model_path = xumx_valve_model_path if MACHINE == 'valve' else xumx_slider_model_path
+ae_path_base = '/hdd/hdd1/kjc/xumx/ae/cont'
 
 machine_types = [S1, S2]
 num_eval_normal = 250
@@ -59,18 +62,26 @@ num_eval_normal = 250
 
 
 def generate_label(y):
+    # np, [c, t]
+    channels = y.shape[0]
     rms_fig = librosa.feature.rms(y=y)
-    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
+    #[c, 1, 313]
+
+    rms_tensor = torch.tensor(rms_fig).permute(0, 2, 1)
+    # [channel, time, 1]
+    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
+    # [channel, time]
 
     if MACHINE == 'valve':
         k = int(y.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim, k)
+        min_threshold, _ = torch.kthvalue(rms_trim[0, :], k)
     else:
         min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
+    
     label = (rms_trim > min_threshold).type(torch.float)
-    label = label.expand(y.shape[0], -1)
+        #[channel, time]
     return label
+
 
 def train_file_to_mixture_wav_label(filename):
     machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
@@ -102,6 +113,8 @@ def eval_file_to_mixture_wav_label(filename):
     
     return sr, ys, gt_wav, active_label_sources
 
+def get_overlap_ratio(signal1, signal2):
+    return torch.sum(torch.logical_and(signal1, signal2)) / torch.sum(torch.logical_or(signal1, signal2))
 
 
 class XUMXSystem(torch.nn.Module):
@@ -373,11 +386,11 @@ if __name__ == "__main__":
                                                                           db=db)
    
         ae_path = f'{ae_path_base}/{MACHINE}'
-        os.makedirs(ae_path, exist_ok= True)
+        os.makedirs(ae_path, exist_ok=True)
 
         sep_model = xumx_model(xumx_model_path)
-        sep_model.eval()
         sep_model = sep_model.cuda()
+        sep_model.eval()
 
 
         # dataset generator
@@ -428,18 +441,28 @@ if __name__ == "__main__":
                
         # evaluation
         print("============== EVALUATION ==============")
-        y_pred = numpy.array([0. for k in eval_labels])
+        y_pred_mean = numpy.array([0. for k in eval_labels])
+        y_pred_max = numpy.array([0. for k in eval_labels])
         y_true = numpy.array(eval_labels)
         sdr_pred_normal = {mt: [] for mt in machine_types}
         sdr_pred_abnormal = {mt: [] for mt in machine_types}
 
         eval_types = {mt: [] for mt in machine_types}
+<<<<<<< HEAD
+=======
+        
+        overlap_log = []
+        
+        # for file in eval_files:
+        #     print(file)
+>>>>>>> origin/kjc-overlap
             
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
             machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
             target_idx = machine_types.index(machine_type)  
             
             sr, mixture_y, y_raw, active_label_sources = eval_file_to_mixture_wav_label(file_name)
+            overlap_ratio = get_overlap_ratio(active_label_sources[machine_types[0]], active_label_sources[machine_types[1]])
             
             active_labels = torch.stack([active_label_sources[src] for src in machine_types])
             _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
@@ -459,7 +482,18 @@ if __name__ == "__main__":
             sep_sdr, _, _, _ = museval.evaluate(numpy.expand_dims(y_raw[machine_type][0, :ys.shape[0]], axis=(0,2)), 
                                         numpy.expand_dims(ys, axis=(0,2)))
 
-            y_pred[num] = torch.mean(error).detach().cpu().numpy()
+            y_pred_mean[num] = torch.mean(error).detach().cpu().numpy()
+            y_pred_max[num] = torch.max(error).detach().cpu().numpy()
+            
+            overlap_log.append([
+                    'normal' if num < num_eval_normal * 2 else 'abnormal',
+                    machine_type,
+                    numpy.mean(sep_sdr),
+                    torch.mean(error).detach().cpu().item(), 
+                    torch.max(error).detach().cpu().item(), 
+                    overlap_ratio.item()
+                    ])
+            
             eval_types[machine_type].append(num)
 
             if num < num_eval_normal * 2: # normal file
@@ -467,22 +501,33 @@ if __name__ == "__main__":
             else: # abnormal file
                 sdr_pred_abnormal[machine_type].append(numpy.mean(sep_sdr))
 
-        scores = []
+        with open('overlap_sep.pkl', 'wb') as f:
+            pickle.dump(overlap_log, f)
+
+        mean_scores = []
+        max_scores = []
         anomaly_detect_score = {}
 
         for machine_type in machine_types:
-            score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred[eval_types[machine_type]])
-
-            logger.info("AUC_{} : {}".format(machine_type, score))
-            evaluation_result["AUC_{}".format(machine_type)] = float(score)
-            scores.append(score)
+            mean_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_mean[eval_types[machine_type]])
+            max_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_max[eval_types[machine_type]])
+            logger.info("AUC_mean_{} : {}".format(machine_type, mean_score))
+            logger.info("AUC_max_{} : {}".format(machine_type, max_score))
+            evaluation_result["AUC_mean_{}".format(machine_type)] = float(mean_score)
+            evaluation_result["AUC_max_{}".format(machine_type)] = float(max_score)
+            mean_scores.append(mean_score)
+            max_scores.append(max_score)
             logger.info("SDR_normal_{} : {}".format(machine_type, sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type])))
             logger.info("SDR_abnormal_{} : {}".format(machine_type, sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type])))
             evaluation_result["SDR_normal_{}".format(machine_type)] = float(sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type]))
             evaluation_result["SDR_abnormal_{}".format(machine_type)] = float(sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type]))
-        score = sum(scores) / len(scores)
-        logger.info("AUC : {}".format(score))
-        evaluation_result["AUC"] = float(score)
+        
+        mean_score = sum(mean_scores) / len(mean_scores)
+        max_score = sum(max_scores) / len(max_scores)
+        logger.info("AUC_mean : {}".format(mean_score))
+        logger.info("AUC_max : {}".format(max_score))
+        evaluation_result["AUC_mean"] = float(mean_score)
+        evaluation_result["AUC_max"] = float(max_score)
         results[evaluation_result_key] = evaluation_result
         print("===========================")
 

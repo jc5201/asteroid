@@ -42,6 +42,9 @@ __versions__ = "1.0.3"
 ########################################################################
 
 
+MACHINE = 'valve'
+num_eval_normal = 250
+
 
 ########################################################################
 # feature extractor
@@ -180,10 +183,6 @@ def dataset_generator(target_dir,
 ########################################################################
 if __name__ == "__main__":
 
-    # set gpu
-    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"  
-    os.environ["CUDA_VISIBLE_DEVICES"]= "5"  
-
     # load parameter yaml
     with open("baseline.yaml") as stream:
         param = yaml.safe_load(stream)
@@ -203,7 +202,7 @@ if __name__ == "__main__":
     visualizer = visualizer()
 
     # load base_directory list
-    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/valve/*".format(base=param["base_directory"]))))
+    dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/{machine}/*".format(base=param["base_directory"], machine=MACHINE))))
     print(dirs)
 
     # setup the result
@@ -249,16 +248,16 @@ if __name__ == "__main__":
 
         # dataset generator
         print("============== DATASET_GENERATOR ==============")
-        if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
-            train_files = load_pickle(train_pickle)
-            eval_files = load_pickle(eval_files_pickle)
-            eval_labels = load_pickle(eval_labels_pickle)
-        else:
-            train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
+        # if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
+        #     train_files = load_pickle(train_pickle)
+        #     eval_files = load_pickle(eval_files_pickle)
+        #     eval_labels = load_pickle(eval_labels_pickle)
+        # else:
+        train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
 
-            save_pickle(train_pickle, train_files)
-            save_pickle(eval_files_pickle, eval_files)
-            save_pickle(eval_labels_pickle, eval_labels)
+        save_pickle(train_pickle, train_files)
+        save_pickle(eval_files_pickle, eval_files)
+        save_pickle(eval_labels_pickle, eval_labels)
 
         train_dataset = AEDataset(train_files, param)
         train_loader = torch.utils.data.DataLoader(
@@ -289,7 +288,8 @@ if __name__ == "__main__":
 
         # evaluation
         print("============== EVALUATION ==============")
-        y_pred = [0. for k in eval_labels]
+        y_pred_mean = [0. for k in eval_labels]
+        y_pred_max = [0. for k in eval_labels]
         y_true = eval_labels
 
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
@@ -301,15 +301,19 @@ if __name__ == "__main__":
                                         power=param["feature"]["power"])
             data = torch.Tensor(data).cuda()
             error = torch.mean(((data - model(data)) ** 2), dim=1)
-            y_pred[num] = torch.mean(error).detach().cpu().numpy()
+            y_pred_mean[num] = torch.mean(error).detach().cpu().numpy()
+            y_pred_max[num] = torch.max(error).detach().cpu().numpy()
 
         # save model
         torch.save(model.state_dict(), model_file)
-        score = metrics.roc_auc_score(y_true, y_pred)
-        logger.info("anomaly score abnormal : {}".format(str(numpy.array(y_pred)[y_true.astype(bool)])))
-        logger.info("anomaly score normal : {}".format(str(numpy.array(y_pred)[numpy.logical_not(y_true)])))
-        logger.info("AUC : {}".format(score))
-        evaluation_result["AUC"] = float(score)
+        mean_score = metrics.roc_auc_score(y_true, y_pred_mean)
+        max_score = metrics.roc_auc_score(y_true, y_pred_max)
+        # logger.info("anomaly score abnormal : {}".format(str(numpy.array(y_pred)[y_true.astype(bool)])))
+        # logger.info("anomaly score normal : {}".format(str(numpy.array(y_pred)[numpy.logical_not(y_true)])))
+        logger.info("AUC_mean : {}".format(mean_score))
+        logger.info("AUC_max : {}".format(max_score))
+        evaluation_result["AUC_mean"] = float(mean_score)
+        evaluation_result["AUC_max"] = float(max_score)
         results[evaluation_result_key] = evaluation_result
         print("===========================")
 
