@@ -49,6 +49,7 @@ class MIMIISingleDataset(torch.utils.data.Dataset):
         self.subset = subset
         self.samples_per_track = samples_per_track
         self.normal = normal
+        self.machine_type = machine_type
         self.tracks = list(self.get_tracks())
         if not self.tracks:
             raise RuntimeError("No tracks found.")
@@ -56,7 +57,6 @@ class MIMIISingleDataset(torch.utils.data.Dataset):
         self.normal = True
         self.task_random = task_random
         self.source_random = source_random
-        self.machine_type = machine_type
         self.control_type = control_type
 
     def __getitem__(self, index):
@@ -123,7 +123,7 @@ class MIMIISingleDataset(torch.utils.data.Dataset):
                     active_label_sources[source] = label
 
                 elif self.control_type == 'rms':
-                    rms_fig = librosa.feature.rms(np.transpose(np_audio)) #[1, 313]
+                    rms_fig = librosa.feature.rms(y = np.transpose(np_audio)) #[1, 313]
                     rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
                     rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
 
@@ -135,7 +135,7 @@ class MIMIISingleDataset(torch.utils.data.Dataset):
                         
                     label = (rms_trim > min_threshold).type(torch.float) 
                     label = label.expand(audio.shape[0], -1)
-                    active_label_sources[source] = label    
+                    active_label_sources[source] = label
 
         
         # make mixture 
@@ -151,7 +151,7 @@ class MIMIISingleDataset(torch.utils.data.Dataset):
         if targets:
             audio_sources = audioes[:, 0:2, :]
         if self.use_control:
-            active_labels = torch.stack([active_label_sources[src] for src in targets])
+            active_labels = torch.stack([active_label_sources[src][0:2, :] for src in targets])
             # [source, channel, time]
             return audio_mix, audio_sources, active_labels
 
