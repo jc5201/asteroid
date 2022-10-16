@@ -1,14 +1,16 @@
 import itertools
 from itertools import permutations
-import numpy as np
+from operator import itemgetter
 
+import numpy as np
 import torch
+from torch.nn.modules.loss import _Loss
+from torch import nn
 
 from asteroid.models.x_umx import _STFT, _Spectrogram
 from asteroid.losses.pit_wrapper import PITLossWrapper
 from asteroid.losses import singlesrc_mse
-from torch.nn.modules.loss import _Loss
-from torch import nn
+
 
 class CustomPITLossWrapper(PITLossWrapper):
     def __init__(self, loss_func, pit_from="pw_mtx", perm_reduce=None):
