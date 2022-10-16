@@ -1,23 +1,11 @@
 #!/usr/bin/env python
-"""
- @file   baseline.py
- @brief  Baseline code of simple AE-based anomaly detection used experiment in [1].
- @author Ryo Tanabe and Yohei Kawaguchi (Hitachi Ltd.)
- Copyright (C) 2019 Hitachi, Ltd. All right reserved.
- [1] Harsh Purohit, Ryo Tanabe, Kenji Ichige, Takashi Endo, Yuki Nikaido, Kaori Suefusa, and Yohei Kawaguchi, "MIMII Dataset: Sound Dataset for Malfunctioning Industrial Machine Investigation and Inspection," arXiv preprint arXiv:1909.09347, 2019.
-"""
 ########################################################################
 # import default python-library
 ########################################################################
 import os
 import sys
 import glob
-########################################################################
 
-
-########################################################################
-# import additional python-library
-########################################################################
 import numpy
 import numpy as np
 import librosa
@@ -55,6 +43,7 @@ num_eval_normal = 250
 def generate_label(y):
     # np, [c, t]
     channels = y.shape[0]
+    frames = 5
     rms_fig = librosa.feature.rms(y=y) 
     #[c, 1, 313]
 
@@ -62,6 +51,10 @@ def generate_label(y):
     # [channel, time, 1]
     rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
     # [channel, time]
+
+    rms_trim_spec = torch.stack([torch.tensor(rms_fig[:, 0, i:i+rms_fig.shape[2]-frames+1]) for i in range(frames)], dim=2)
+    #[c, 313-4, 5]
+
 
     if MACHINE == 'valve':
         k = int(y.shape[1]*0.8)
@@ -71,7 +64,8 @@ def generate_label(y):
 
     label = (rms_trim > min_threshold).type(torch.float) 
     #[channel, time]
-    return label
+    label_spec = (rms_trim_spec > min_threshold).type(torch.float) 
+    return label, label_spec
 
 def train_file_to_mixture_wav(filename):
     machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
@@ -101,6 +95,7 @@ def eval_file_to_mixture_wav_label(filename):
     ys = 0
     gt_wav = {}
     active_label_sources = {}
+    active_spec_label_sources = {}
     for normal_type in machine_types:
         if normal_type == machine_type:
             src_filename = filename
@@ -108,10 +103,12 @@ def eval_file_to_mixture_wav_label(filename):
             src_filename = filename.replace(machine_type, normal_type).replace('abnormal', 'normal')
         sr, y = demux_wav(src_filename)
         ys = ys + y
-        active_label_sources[normal_type] = generate_label(np.expand_dims(y, axis=0))
+        label, spec_label = generate_label(np.expand_dims(y, axis=0))
+        active_label_sources[normal_type] = label
+        active_spec_label_sources[normal_type] = spec_label
         gt_wav[normal_type] = y
     
-    return sr, ys, gt_wav, active_label_sources
+    return sr, ys, gt_wav, active_label_sources, active_spec_label_sources
 
 def get_overlap_ratio(signal1, signal2):
     return torch.sum(torch.logical_and(signal1, signal2)) / torch.sum(torch.logical_or(signal1, signal2))
@@ -261,6 +258,9 @@ if __name__ == "__main__":
     with open("baseline.yaml") as stream:
         param = yaml.safe_load(stream)
 
+    # set random seed fixed
+    fix_seed(param['seed'])
+
     # make output directory
     os.makedirs(param["pickle_directory"], exist_ok=True)
     os.makedirs(param["model_directory"], exist_ok=True)
@@ -313,7 +313,7 @@ if __name__ == "__main__":
         # dataset generator
         print("============== DATASET_GENERATOR ==============")
         # if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
-        #     train_files= load_pickle(train_pickle)
+        #     train_files = load_pickle(train_pickle)
         #     eval_files = load_pickle(eval_files_pickle)
         #     eval_labels = load_pickle(eval_labels_pickle)
         # else:
@@ -352,6 +352,7 @@ if __name__ == "__main__":
         print("============== EVALUATION ==============")
         y_pred_mean = numpy.array([0. for k in eval_labels])
         y_pred_max = numpy.array([0. for k in eval_labels])
+        y_pred_mask = numpy.array([0. for k in eval_labels])
         y_true = numpy.array(eval_labels)
 
         eval_types = {mt: [] for mt in machine_types}
@@ -360,7 +361,7 @@ if __name__ == "__main__":
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
             machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
 
-            sr, ys, y_raw, active_label_sources = eval_file_to_mixture_wav_label(file_name)
+            sr, ys, y_raw, active_label_sources, active_spec_label_sources = eval_file_to_mixture_wav_label(file_name)
             overlap_ratio = get_overlap_ratio(active_label_sources[machine_types[0]], active_label_sources[machine_types[1]])
 
             data = wav_to_spec_vector_array(sr, ys,
@@ -370,10 +371,17 @@ if __name__ == "__main__":
                                         hop_length=param["feature"]["hop_length"],
                                         power=param["feature"]["power"])
 
+            n_mels = param["feature"]["n_mels"]
+            frames = param["feature"]["frames"]
+            # [1, 309, 5] -> [309, 5*n_mels]
+            active_spec_label = active_spec_label_sources[machine_type].cuda().unsqueeze(3).repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0)
+
             data = torch.Tensor(data).cuda()
             error = torch.mean(((data - model(data)) ** 2), dim=1)
+            error_mask = torch.mean(((data - model(data)) * active_spec_label) ** 2, dim=1)
             y_pred_mean[num] = torch.mean(error).detach().cpu().numpy()
             y_pred_max[num] = torch.max(error).detach().cpu().numpy()
+            y_pred_mask[num] = torch.mean(error_mask).detach().cpu().numpy()
 
             overlap_log.append([
                     'normal' if num < num_eval_normal else 'abnormal',
@@ -393,21 +401,29 @@ if __name__ == "__main__":
             pickle.dump(overlap_log, f)
         mean_scores = []
         max_scores = []
+        mask_scores = []
         for machine_type in machine_types:
             mean_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_mean[eval_types[machine_type]])
             max_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_max[eval_types[machine_type]])
+            mask_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_mask[eval_types[machine_type]])
             logger.info("AUC_mean_{} : {}".format(machine_type, mean_score))
             logger.info("AUC_max_{} : {}".format(machine_type, max_score))
+            logger.info("AUC_mask_{} : {}".format(machine_type, mask_score))
             evaluation_result["AUC_mean_{}".format(machine_type)] = float(mean_score)
             evaluation_result["AUC_max_{}".format(machine_type)] = float(max_score)
+            evaluation_result["AUC_mask_{}".format(machine_type)] = float(mask_score)
             mean_scores.append(mean_score)
             max_scores.append(max_score)
+            mask_scores.append(mask_score)
         mean_score = sum(mean_scores) / len(mean_scores)
         max_score = sum(max_scores) / len(max_scores)
+        mask_score = sum(mask_scores) / len(mask_scores)
         logger.info("AUC_mean : {}".format(mean_score))
         logger.info("AUC_max : {}".format(max_score))
+        logger.info("AUC_mask : {}".format(mask_score))
         evaluation_result["AUC_mean"] = float(mean_score)
         evaluation_result["AUC_max"] = float(max_score)
+        evaluation_result["AUC_mask"] = float(mask_score)
         results[evaluation_result_key] = evaluation_result
         print("===========================")
 

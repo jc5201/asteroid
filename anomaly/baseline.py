@@ -50,6 +50,37 @@ num_eval_normal = 250
 # feature extractor
 ########################################################################
 
+def generate_spec_label(y):
+    # np, [c, t]
+    channels = y.shape[0]
+    rms_fig = librosa.feature.rms(y=y) 
+    #[c, 1, 313]
+
+    frames = 5
+    rms_trim = torch.stack([torch.tensor(rms_fig[:, 0, i:i+rms_fig.shape[2]-frames+1]) for i in range(frames)], dim=2)
+    #[c, 313-4, 5]
+
+    if MACHINE == 'valve':
+        k = int(rms_fig.shape[2]*0.8)
+        min_threshold, _ = torch.kthvalue(torch.tensor(rms_fig)[0, 0, :], k)
+    else:
+        min_threshold = (torch.max(torch.tensor(rms_fig)) + torch.min(torch.tensor(rms_fig)))/2
+
+    label = (rms_trim > min_threshold).type(torch.float) 
+    #[c, 313-4, 5]
+    return label
+
+def eval_file_to_wav_label(filename):
+    machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
+    ys = 0
+
+    src_filename = filename
+    sr, y = demux_wav(src_filename)
+    ys = ys + y
+    active_spec_label = generate_spec_label(numpy.expand_dims(y, axis=0))
+    
+    return sr, ys, active_spec_label
+
 def list_to_spec_vector_array(file_list,
                          msg="calc...",
                          n_mels=64,
@@ -187,19 +218,13 @@ if __name__ == "__main__":
     with open("baseline.yaml") as stream:
         param = yaml.safe_load(stream)
 
-    # set random seed fixed
-    torch.manual_seed(param['seed'])
-    torch.cuda.manual_seed(param['seed']) 
-    torch.backends.cudnn.deterministic = True 
-    torch.backends.cudnn.benchmark = False
 
+    fix_seed(param['seed'])
+    
     # make output directory
     os.makedirs(param["pickle_directory"], exist_ok=True)
     os.makedirs(param["model_directory"], exist_ok=True)
     os.makedirs(param["result_directory"], exist_ok=True)
-
-    # initialize the visualizer
-    visualizer = visualizer()
 
     # load base_directory list
     dirs = sorted(glob.glob(os.path.abspath("{base}/6dB/{machine}/*".format(base=param["base_directory"], machine=MACHINE))))
@@ -290,30 +315,45 @@ if __name__ == "__main__":
         print("============== EVALUATION ==============")
         y_pred_mean = [0. for k in eval_labels]
         y_pred_max = [0. for k in eval_labels]
+        y_pred_mask = [0. for k in eval_labels]
         y_true = eval_labels
 
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
-            data = file_to_spec_vector_array(file_name,
+            
+            sr, ys, active_spec_label = eval_file_to_wav_label(file_name)
+            # active_label [channel, time]
+            data = wav_to_spec_vector_array(sr, ys,
                                         n_mels=param["feature"]["n_mels"],
                                         frames=param["feature"]["frames"],
                                         n_fft=param["feature"]["n_fft"],
                                         hop_length=param["feature"]["hop_length"],
                                         power=param["feature"]["power"])
+            
+            n_mels = param["feature"]["n_mels"]
+            frames = param["feature"]["frames"]
+            # [1, 309, 5] -> [309, 5*n_mels]
+            active_spec_label = active_spec_label.cuda().unsqueeze(3).repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0)
+
             data = torch.Tensor(data).cuda()
-            error = torch.mean(((data - model(data)) ** 2), dim=1)
+            error = torch.mean((data - model(data)) ** 2, dim=1)
+            error_mask = torch.mean(((data - model(data)) * active_spec_label) ** 2, dim=1)
             y_pred_mean[num] = torch.mean(error).detach().cpu().numpy()
             y_pred_max[num] = torch.max(error).detach().cpu().numpy()
+            y_pred_mask[num] = torch.mean(error_mask).detach().cpu().numpy()
 
         # save model
         torch.save(model.state_dict(), model_file)
         mean_score = metrics.roc_auc_score(y_true, y_pred_mean)
         max_score = metrics.roc_auc_score(y_true, y_pred_max)
+        mask_score = metrics.roc_auc_score(y_true, y_pred_mask)
         # logger.info("anomaly score abnormal : {}".format(str(numpy.array(y_pred)[y_true.astype(bool)])))
         # logger.info("anomaly score normal : {}".format(str(numpy.array(y_pred)[numpy.logical_not(y_true)])))
         logger.info("AUC_mean : {}".format(mean_score))
         logger.info("AUC_max : {}".format(max_score))
+        logger.info("AUC_mask : {}".format(mask_score))
         evaluation_result["AUC_mean"] = float(mean_score)
         evaluation_result["AUC_max"] = float(max_score)
+        evaluation_result["AUC_mask"] = float(mask_score)
         results[evaluation_result_key] = evaluation_result
         print("===========================")
 

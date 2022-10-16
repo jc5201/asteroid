@@ -10,6 +10,8 @@ import librosa.feature
 import yaml
 import logging
 from tqdm import tqdm
+import random
+import torch
 
 
 ########################################################################
@@ -147,6 +149,15 @@ class visualizer(object):
 
 ########################################################################
 
+
+def fix_seed(seed: int = 42):
+    random.seed(seed) # random
+    numpy.random.seed(seed) # numpy
+    os.environ["PYTHONHASHSEED"] = str(seed) 
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
+    torch.backends.cudnn.deterministic = True 
+    torch.backends.cudnn.benchmark = False
 
 
 ########################################################################

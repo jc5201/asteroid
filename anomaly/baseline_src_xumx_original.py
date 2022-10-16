@@ -64,6 +64,7 @@ num_eval_normal = 250
 def generate_label(y):
         # np, [c, t]
         channels = y.shape[0]
+    frames = 5
     rms_fig = librosa.feature.rms(y=y)
         #[c, 1, 313]
 
@@ -71,6 +72,9 @@ def generate_label(y):
         # [channel, time, 1]
         rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
         # [channel, time]
+
+    rms_trim_spec = torch.stack([torch.tensor(rms_fig[:, 0, i:i+rms_fig.shape[2]-frames+1]) for i in range(frames)], dim=2)
+    #[c, 313-4, 5]
 
     if MACHINE == 'valve':
         k = int(y.shape[1]*0.8)
@@ -80,7 +84,8 @@ def generate_label(y):
     
     label = (rms_trim > min_threshold).type(torch.float)
         #[channel, time]
-    return label
+    label_spec = (rms_trim_spec > min_threshold).type(torch.float) 
+    return label, label_spec
 
 def train_file_to_mixture_wav_label(filename):
     machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
@@ -89,7 +94,8 @@ def train_file_to_mixture_wav_label(filename):
     for machine in machine_types:
         src_filename = filename.replace(machine_type, machine)
         sr, y = file_to_wav_stereo(src_filename)
-        active_label_sources[machine] = generate_label(y)
+        label, _ = generate_label(y)
+        active_label_sources[machine] = label
         ys = ys + y
 
     return sr, ys, active_label_sources
@@ -100,17 +106,25 @@ def eval_file_to_mixture_wav_label(filename):
     ys = 0
     gt_wav = {}
     active_label_sources = {}
+    active_spec_label_sources = {}
     for normal_type in machine_types:
         if normal_type == machine_type:
             src_filename = filename
         else:
             src_filename = filename.replace(machine_type, normal_type).replace('abnormal', 'normal')
         sr, y = file_to_wav_stereo(src_filename)
+        
+        # if normal_type != machine_type:
+        #     delay = random.randint(0, 16000)
+        #     audio_len = y.shape[1]  
+        #     y = np.concatenate([np.zeros_like(y)[:, :delay], y[:, :audio_len - delay]], axis=1)
         ys = ys + y
-        active_label_sources[normal_type] = generate_label(y)
+        label, spec_label = generate_label(y)
+        active_label_sources[normal_type] = label
+        active_spec_label_sources[normal_type] = spec_label
         gt_wav[normal_type] = y
     
-    return sr, ys, gt_wav, active_label_sources
+    return sr, ys, gt_wav, active_label_sources, active_spec_label_sources
 
 def get_overlap_ratio(signal1, signal2):
     return torch.sum(torch.logical_and(signal1, signal2)) / torch.sum(torch.logical_or(signal1, signal2))
@@ -306,15 +320,6 @@ def dataset_generator(target_dir,
     return train_files, train_labels, eval_files, eval_labels
 
 
-def fix_seed(seed: int = 42):
-    random.seed(seed) # random
-    numpy.random.seed(seed) # numpy
-    os.environ["PYTHONHASHSEED"] = str(seed) 
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed) 
-    torch.backends.cudnn.deterministic = True 
-    torch.backends.cudnn.benchmark = False
-
 ########################################################################
 
 
@@ -440,6 +445,7 @@ if __name__ == "__main__":
         print("============== EVALUATION ==============")
         y_pred_mean = numpy.array([0. for k in eval_labels])
         y_pred_max = numpy.array([0. for k in eval_labels])
+        y_pred_mask = numpy.array([0. for k in eval_labels])
         y_true = numpy.array(eval_labels)
         sdr_pred_normal = {mt: [] for mt in machine_types}
         sdr_pred_abnormal = {mt: [] for mt in machine_types}
@@ -455,7 +461,7 @@ if __name__ == "__main__":
             machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
             target_idx = machine_types.index(machine_type)  
             
-            sr, mixture_y, y_raw, active_label_sources = eval_file_to_mixture_wav_label(file_name)
+            sr, mixture_y, y_raw, active_label_sources, active_spec_label_sources = eval_file_to_mixture_wav_label(file_name)
             overlap_ratio = get_overlap_ratio(active_label_sources[machine_types[0]], active_label_sources[machine_types[1]])
             
             active_labels = torch.stack([active_label_sources[src] for src in machine_types])
@@ -470,14 +476,26 @@ if __name__ == "__main__":
                                         hop_length=param["feature"]["hop_length"],
                                         power=param["feature"]["power"])
             
+            n_mels = param["feature"]["n_mels"]
+            frames = param["feature"]["frames"]
+            # [1, 309, 5] -> [309, 5*n_mels]
+            active_spec_label = active_spec_label_sources[machine_type][:1, :, :].cuda().unsqueeze(3)   \
+                .repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0)
+
             data = torch.Tensor(data).cuda()
             error = torch.mean(((data - model[machine_type](data)) ** 2), dim=1)
+            error_mask = torch.mean(((data - model[machine_type](data)) * active_spec_label) ** 2, dim=1)
 
             sep_sdr, _, _, _ = museval.evaluate(numpy.expand_dims(y_raw[machine_type][0, :ys.shape[0]], axis=(0,2)), 
                                         numpy.expand_dims(ys, axis=(0,2)))
+            # y_gt = torch.stack([torch.Tensor(y_raw[src]) for src in machine_types])[:, :, :ys.shape[0]]
+
+            # sep_sdr, _, _, _ = museval.evaluate(y_gt.permute(0, 2, 1), 
+            #                             time.squeeze(1).permute(0, 2, 1).detach().cpu())
 
             y_pred_mean[num] = torch.mean(error).detach().cpu().numpy()
             y_pred_max[num] = torch.max(error).detach().cpu().numpy()
+            y_pred_mask[num] = torch.mean(error_mask).detach().cpu().numpy()
             
             overlap_log.append([
                     'normal' if num < num_eval_normal * 2 else 'abnormal',
@@ -500,17 +518,22 @@ if __name__ == "__main__":
 
         mean_scores = []
         max_scores = []
+        mask_scores = []
         anomaly_detect_score = {}
 
         for machine_type in machine_types:
             mean_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_mean[eval_types[machine_type]])
             max_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_max[eval_types[machine_type]])
+            mask_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_mask[eval_types[machine_type]])
             logger.info("AUC_mean_{} : {}".format(machine_type, mean_score))
             logger.info("AUC_max_{} : {}".format(machine_type, max_score))
+            logger.info("AUC_mask_{} : {}".format(machine_type, mask_score))
             evaluation_result["AUC_mean_{}".format(machine_type)] = float(mean_score)
             evaluation_result["AUC_max_{}".format(machine_type)] = float(max_score)
+            evaluation_result["AUC_mask_{}".format(machine_type)] = float(mask_score)
             mean_scores.append(mean_score)
             max_scores.append(max_score)
+            mask_scores.append(mask_score)
             logger.info("SDR_normal_{} : {}".format(machine_type, sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type])))
             logger.info("SDR_abnormal_{} : {}".format(machine_type, sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type])))
             evaluation_result["SDR_normal_{}".format(machine_type)] = float(sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type]))
@@ -518,10 +541,13 @@ if __name__ == "__main__":
         
         mean_score = sum(mean_scores) / len(mean_scores)
         max_score = sum(max_scores) / len(max_scores)
+        mask_score = sum(max_scores) / len(mask_scores)
         logger.info("AUC_mean : {}".format(mean_score))
         logger.info("AUC_max : {}".format(max_score))
+        logger.info("AUC_mask : {}".format(mask_score))
         evaluation_result["AUC_mean"] = float(mean_score)
         evaluation_result["AUC_max"] = float(max_score)
+        evaluation_result["AUC_mask"] = float(mask_score)
         results[evaluation_result_key] = evaluation_result
         print("===========================")
 
