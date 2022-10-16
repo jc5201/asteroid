@@ -207,8 +207,6 @@ class XUMXControl(BaseModel):
             inputs[i] += self.mean_scale["input_mean_{}".format(src)]
             inputs[i] *= self.mean_scale["input_scale_{}".format(src)]
 
-            ### concat controls
-            # TODO 
             inputs[i] = torch.cat([inputs[i], controls_spec[i]], dim=2)  ##TODO fix concat dimension
             inputs[i] = self.layer_enc[src](inputs[i], shapes)
 
@@ -227,8 +225,6 @@ class XUMXControl(BaseModel):
         #[Tb, B, hidden*2]
         mask_list = []
         for i, src in enumerate(self.sources):
-            # TODO
-            # TODO controls_spec channel
             x_tmp = torch.cat([cross_2, controls_spec[i, :, :, 0, :]], dim = 2)
             # controls_spec
             x_tmp = self.layer_dec[src](x_tmp, shapes)

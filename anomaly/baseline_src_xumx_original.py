@@ -132,7 +132,7 @@ def xumx_model(path):
         hidden_size=512,
         in_chan=4096,
         n_hop=1024,
-        sources=['s1', 's2'],
+        sources=['s1', 's2', 's3', 's4'][:len(machine_types)],
         max_bin=bandwidth_to_max_bin(16000, 4096, 16000),
         bidirectional=True,
         sample_rate=16000,
@@ -284,12 +284,10 @@ def dataset_generator(target_dir,
 
 
     # 02 abnormal list generate
-    abnormal_files = sorted(glob.glob(
-        os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir,
-                                                                   abnormal_dir_name=abnormal_dir_name,
-                                                                   ext=ext))))
+    abnormal_files = []
+    for mt in machine_types:
     abnormal_files.extend(sorted(glob.glob(
-        os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir.replace(S1, S2),
+            os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir.replace(S1, mt),
                                                                    abnormal_dir_name=abnormal_dir_name,
                                                                  ext=ext)))))                                               
     abnormal_labels = numpy.ones(len(abnormal_files))
@@ -301,7 +299,7 @@ def dataset_generator(target_dir,
     train_labels = normal_labels[num_eval_normal:]
     eval_normal_files = sum([[fan_file.replace(S1, machine_type) for fan_file in normal_files[:num_eval_normal]] for machine_type in machine_types], [])
     eval_files = numpy.concatenate((eval_normal_files, abnormal_files), axis=0)
-    eval_labels = numpy.concatenate((normal_labels[:num_eval_normal], normal_labels[:num_eval_normal], abnormal_labels), axis=0)  ##TODO 
+    eval_labels = numpy.concatenate((np.repeat(normal_labels[:num_eval_normal], len(machine_types)), abnormal_labels), axis=0)  ##TODO 
     logger.info("train_file num : {num}".format(num=len(train_files)))
     logger.info("eval_file  num : {num}".format(num=len(eval_files)))
 
@@ -394,11 +392,11 @@ if __name__ == "__main__":
 
         # dataset generator
         print("============== DATASET_GENERATOR ==============")
-        if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
-            train_files, train_labels = load_pickle(train_pickle)
-            eval_files = load_pickle(eval_files_pickle)
-            eval_labels = load_pickle(eval_labels_pickle)
-        else:
+        # if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
+        #     train_files, train_labels = load_pickle(train_pickle)
+        #     eval_files = load_pickle(eval_files_pickle)
+        #     eval_labels = load_pickle(eval_labels_pickle)
+        # else:
             train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
             save_pickle(train_pickle, (train_files, train_labels))
             save_pickle(eval_files_pickle, eval_files)
@@ -492,7 +490,7 @@ if __name__ == "__main__":
             
             eval_types[machine_type].append(num)
 
-            if num < num_eval_normal * 2: # normal file
+            if num < num_eval_normal * len(machine_types): # normal file
                 sdr_pred_normal[machine_type].append(numpy.mean(sep_sdr))
             else: # abnormal file
                 sdr_pred_abnormal[machine_type].append(numpy.mean(sep_sdr))
