@@ -452,8 +452,6 @@ if __name__ == "__main__":
 
         eval_types = {mt: [] for mt in machine_types}
         
-        overlap_log = []
-        
         # for file in eval_files:
         #     print(file)
             
@@ -462,7 +460,7 @@ if __name__ == "__main__":
             target_idx = machine_types.index(machine_type)  
             
             sr, mixture_y, y_raw, active_label_sources, active_spec_label_sources = eval_file_to_mixture_wav_label(file_name)
-            overlap_ratio = get_overlap_ratio(active_label_sources[machine_types[0]], active_label_sources[machine_types[1]])
+            # overlap_ratio = get_overlap_ratio(active_label_sources[machine_types[0]], active_label_sources[machine_types[1]])
             
             active_labels = torch.stack([active_label_sources[src] for src in machine_types])
             _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
@@ -497,24 +495,12 @@ if __name__ == "__main__":
             y_pred_max[num] = torch.max(error).detach().cpu().numpy()
             y_pred_mask[num] = torch.mean(error_mask).detach().cpu().numpy()
             
-            overlap_log.append([
-                    'normal' if num < num_eval_normal * 2 else 'abnormal',
-                    machine_type,
-                    numpy.mean(sep_sdr),
-                    torch.mean(error).detach().cpu().item(), 
-                    torch.max(error).detach().cpu().item(), 
-                    overlap_ratio.item()
-                    ])
-            
             eval_types[machine_type].append(num)
 
             if num < num_eval_normal * len(machine_types): # normal file
                 sdr_pred_normal[machine_type].append(numpy.mean(sep_sdr))
             else: # abnormal file
                 sdr_pred_abnormal[machine_type].append(numpy.mean(sep_sdr))
-
-        with open('overlap_sep.pkl', 'wb') as f:
-            pickle.dump(overlap_log, f)
 
         mean_scores = []
         max_scores = []

@@ -356,13 +356,12 @@ if __name__ == "__main__":
         y_true = numpy.array(eval_labels)
 
         eval_types = {mt: [] for mt in machine_types}
-        overlap_log = []
     
         for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
             machine_type = os.path.split(os.path.split(os.path.split(file_name)[0])[0])[1]
 
             sr, ys, y_raw, active_label_sources, active_spec_label_sources = eval_file_to_mixture_wav_label(file_name)
-            overlap_ratio = get_overlap_ratio(active_label_sources[machine_types[0]], active_label_sources[machine_types[1]])
+            # overlap_ratio = get_overlap_ratio(active_label_sources[machine_types[0]], active_label_sources[machine_types[1]])
 
             data = wav_to_spec_vector_array(sr, ys,
                                         n_mels=param["feature"]["n_mels"],
@@ -383,22 +382,12 @@ if __name__ == "__main__":
             y_pred_max[num] = torch.max(error).detach().cpu().numpy()
             y_pred_mask[num] = torch.mean(error_mask).detach().cpu().numpy()
 
-            overlap_log.append([
-                    'normal' if num < num_eval_normal else 'abnormal',
-                    machine_type,
-                    torch.mean(error).detach().cpu().item(), 
-                    torch.max(error).detach().cpu().item(), 
-                    overlap_ratio.item()
-                    ])
-            
             if num < num_eval_normal:
                 for mt in machine_types:
                     eval_types[mt].append(num)
             else:
                 eval_types[machine_type].append(num)
 
-        with open('overlap_mix.pkl', 'wb') as f:
-            pickle.dump(overlap_log, f)
         mean_scores = []
         max_scores = []
         mask_scores = []
