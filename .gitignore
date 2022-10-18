@@ -15,6 +15,7 @@ egs/**/wandb
 anomaly/model/**
 anomaly/pickle/**
 anomaly/result/**
+anomaly/result**
 
 .vscode*
 
