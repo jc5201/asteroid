@@ -41,8 +41,8 @@ __versions__ = "1.0.3"
 
 ########################################################################
 # choose machine type and id
-S1 = 'id_04'
-S2 = 'id_06'
+S1 = 'id_00'
+S2 = 'id_02'
 MACHINE = 'slider'
 FILE = 'slider_id04_id06_original.pth'
 xumx_slider_model_path = '/hdd/hdd1/sss/xumx/1013_9_slider0246_fix_control/checkpoints/epoch=198-step=3382.ckpt'
@@ -62,12 +62,11 @@ num_eval_normal = 250
 
 
 def generate_label(y):
-        # np, [c, t]
+    # np, [c, t]
     channels = y.shape[0]
     frames = 5
     rms_fig = librosa.feature.rms(y=y)
     #[c, 1, 313]
-
     rms_tensor = torch.tensor(rms_fig).permute(0, 2, 1)
     # [channel, time, 1]
     rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
@@ -525,7 +524,7 @@ if __name__ == "__main__":
         
         mean_score = sum(mean_scores) / len(mean_scores)
         max_score = sum(max_scores) / len(max_scores)
-        mask_score = sum(max_scores) / len(mask_scores)
+        mask_score = sum(mask_scores) / len(mask_scores)
         logger.info("AUC_mean : {}".format(mean_score))
         logger.info("AUC_max : {}".format(max_score))
         logger.info("AUC_mask : {}".format(mask_score))
