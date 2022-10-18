@@ -44,7 +44,6 @@ __versions__ = "1.0.3"
 
 MACHINE = 'slider'
 num_eval_normal = 250
-machine_type = ['id_00', 'id_02']
 
 ########################################################################
 # feature extractor
@@ -279,7 +278,11 @@ if __name__ == "__main__":
         #     eval_files = load_pickle(eval_files_pickle)
         #     eval_labels = load_pickle(eval_labels_pickle)
         # else:
+<<<<<<< HEAD
         train_files, train_labels, eval_files, eval_labels  = dataset_generator(target_dir)
+=======
+        train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
+>>>>>>> 96d80767a4a1f9ea8124931121420749682837b3
 
         save_pickle(train_pickle, train_files)
         save_pickle(eval_files_pickle, eval_files)
@@ -287,6 +290,7 @@ if __name__ == "__main__":
 
         if dir_idx == 0:
             train_dataset = AEDataset(train_files, param)
+<<<<<<< HEAD
             eval_files_ = eval_files
             eval_labels_ = eval_labels
             eval_num = len(eval_labels_)
@@ -296,6 +300,13 @@ if __name__ == "__main__":
             eval_files = numpy.concatenate((eval_files_, eval_files), axis = 0)
             eval_labels = numpy.concatenate((eval_labels_, eval_labels), axis = 0)
            
+=======
+        else:
+            train_dataset_ = AEDataset(train_files, param)
+            train_dataset.data_vector = numpy.concatenate((train_dataset.data_vector, train_dataset_.data_vector), axis = 0)
+        
+        
+>>>>>>> 96d80767a4a1f9ea8124931121420749682837b3
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=param["fit"]["batch_size"], shuffle=True,
     )
@@ -327,7 +338,11 @@ if __name__ == "__main__":
     y_pred_max = [0. for k in eval_labels]
     y_pred_mask = [0. for k in eval_labels]
     y_true = eval_labels
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> 96d80767a4a1f9ea8124931121420749682837b3
     for num, file_name in tqdm(enumerate(eval_files), total=len(eval_files)):
         
         sr, ys, active_spec_label = eval_file_to_wav_label(file_name)
@@ -350,6 +365,7 @@ if __name__ == "__main__":
         y_pred_mean[num] = torch.mean(error).detach().cpu().numpy()
         y_pred_max[num] = torch.max(error).detach().cpu().numpy()
         y_pred_mask[num] = torch.mean(error_mask).detach().cpu().numpy()
+<<<<<<< HEAD
         
         
     # save model
@@ -384,12 +400,29 @@ if __name__ == "__main__":
     max_score = (max_score1 + max_score2)/2
     mask_score = (mask_score1 + mask_score2)/2
     
+=======
+
+    # save model
+    torch.save(model.state_dict(), model_file)
+    mean_score = metrics.roc_auc_score(y_true, y_pred_mean)
+    max_score = metrics.roc_auc_score(y_true, y_pred_max)
+    mask_score = metrics.roc_auc_score(y_true, y_pred_mask)
+    # logger.info("anomaly score abnormal : {}".format(str(numpy.array(y_pred)[y_true.astype(bool)])))
+    # logger.info("anomaly score normal : {}".format(str(numpy.array(y_pred)[numpy.logical_not(y_true)])))
+    logger.info("AUC_mean : {}".format(mean_score))
+    logger.info("AUC_max : {}".format(max_score))
+    logger.info("AUC_mask : {}".format(mask_score))
+>>>>>>> 96d80767a4a1f9ea8124931121420749682837b3
     evaluation_result["AUC_mean"] = float(mean_score)
     evaluation_result["AUC_max"] = float(max_score)
     evaluation_result["AUC_mask"] = float(mask_score)
     results[evaluation_result_key] = evaluation_result
     print("===========================")
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> 96d80767a4a1f9ea8124931121420749682837b3
 # output results
 print("\n===========================")
 logger.info("all results -> {}".format(result_file))
