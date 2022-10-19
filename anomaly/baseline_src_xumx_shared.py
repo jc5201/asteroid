@@ -58,20 +58,6 @@ num_eval_normal = 250
 ########################################################################
 
 
-def generate_label(y):
-    rms_fig = librosa.feature.rms(y=y)
-    rms_tensor = torch.tensor(rms_fig).reshape(1, -1, 1)
-    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(1, -1)[:, :160000]
-
-    if MACHINE == 'valve':
-        k = int(y.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim, k)
-    else:
-        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
-    label = (rms_trim > min_threshold).type(torch.float)
-    label = label.expand(y.shape[0], -1)
-    return label
-
 def train_file_to_mixture_wav_label(filename):
     machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
     ys = 0
@@ -79,7 +65,7 @@ def train_file_to_mixture_wav_label(filename):
     for machine in machine_types:
         src_filename = filename.replace(machine_type, machine)
         sr, y = file_to_wav_stereo(src_filename)
-        active_label_sources[machine] = generate_label(y)
+        active_label_sources[machine], _ = generate_label(y, MACHINE)
         ys = ys + y
 
     return sr, ys, active_label_sources
@@ -97,7 +83,7 @@ def eval_file_to_mixture_wav_label(filename):
             src_filename = filename.replace(machine_type, normal_type).replace('abnormal', 'normal')
         sr, y = file_to_wav_stereo(src_filename)
         ys = ys + y
-        active_label_sources[normal_type] = generate_label(y)
+        active_label_sources[normal_type], _ = generate_label(y, MACHINE)
         gt_wav[normal_type] = y
     
     return sr, ys, gt_wav, active_label_sources

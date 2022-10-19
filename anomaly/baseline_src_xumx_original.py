@@ -61,32 +61,6 @@ num_eval_normal = 250
 ########################################################################
 
 
-def generate_label(y):
-        # np, [c, t]
-    channels = y.shape[0]
-    frames = 5
-    rms_fig = librosa.feature.rms(y=y)
-    #[c, 1, 313]
-
-    rms_tensor = torch.tensor(rms_fig).permute(0, 2, 1)
-    # [channel, time, 1]
-    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
-    # [channel, time]
-
-    rms_trim_spec = torch.stack([torch.tensor(rms_fig[:, 0, i:i+rms_fig.shape[2]-frames+1]) for i in range(frames)], dim=2)
-    #[c, 313-4, 5]
-
-    if MACHINE == 'valve':
-        k = int(y.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim[0, :], k)
-    else:
-        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
-    
-    label = (rms_trim > min_threshold).type(torch.float)
-        #[channel, time]
-    label_spec = (rms_trim_spec > min_threshold).type(torch.float) 
-    return label, label_spec
-
 
 def train_file_to_mixture_wav_label(filename):
     machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
@@ -95,7 +69,7 @@ def train_file_to_mixture_wav_label(filename):
     for machine in machine_types:
         src_filename = filename.replace(machine_type, machine)
         sr, y = file_to_wav_stereo(src_filename)
-        label, _ = generate_label(y)
+        label, _ = generate_label(y, MACHINE)
         active_label_sources[machine] = label
         ys = ys + y
 
@@ -120,7 +94,7 @@ def eval_file_to_mixture_wav_label(filename):
         #     audio_len = y.shape[1]  
         #     y = np.concatenate([np.zeros_like(y)[:, :delay], y[:, :audio_len - delay]], axis=1)
         ys = ys + y
-        label, spec_label = generate_label(y)
+        label, spec_label = generate_label(y, MACHINE)
         active_label_sources[normal_type] = label
         active_spec_label_sources[normal_type] = spec_label
         gt_wav[normal_type] = y

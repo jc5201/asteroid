@@ -50,26 +50,6 @@ num_eval_normal = 250
 # feature extractor
 ########################################################################
 
-def generate_spec_label(y):
-    # np, [c, t]
-    channels = y.shape[0]
-    rms_fig = librosa.feature.rms(y=y) 
-    #[c, 1, 313]
-
-    frames = 5
-    rms_trim = torch.stack([torch.tensor(rms_fig[:, 0, i:i+rms_fig.shape[2]-frames+1]) for i in range(frames)], dim=2)
-    #[c, 313-4, 5]
-
-    if MACHINE == 'valve':
-        k = int(rms_fig.shape[2]*0.8)
-        min_threshold, _ = torch.kthvalue(torch.tensor(rms_fig)[0, 0, :], k)
-    else:
-        min_threshold = (torch.max(torch.tensor(rms_fig)) + torch.min(torch.tensor(rms_fig)))/2
-
-    label = (rms_trim > min_threshold).type(torch.float) 
-    #[c, 313-4, 5]
-    return label
-
 def eval_file_to_wav_label(filename):
     machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
     ys = 0
@@ -77,7 +57,7 @@ def eval_file_to_wav_label(filename):
     src_filename = filename
     sr, y = demux_wav(src_filename)
     ys = ys + y
-    active_spec_label = generate_spec_label(numpy.expand_dims(y, axis=0))
+    _, active_spec_label = generate_label(numpy.expand_dims(y, axis=0), MACHINE)
     
     return sr, ys, active_spec_label
 
