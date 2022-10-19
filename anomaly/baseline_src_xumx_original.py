@@ -98,8 +98,10 @@ def train_file_to_mixture_wav_label(filename):
         label, _ = generate_label(y)
         active_label_sources[machine] = label
         ys = ys + y
+        if machine == machine_type:
+            gt_y = y
 
-    return sr, ys, active_label_sources
+    return sr, ys, active_label_sources, gt_y
 
 
 def eval_file_to_mixture_wav_label(filename):
@@ -194,18 +196,18 @@ def train_list_to_mix_sep_spec_vector_array(file_list,
     for idx in tqdm(range(len(file_list)), desc=msg):
         target_type = os.path.split(os.path.split(os.path.split(file_list[idx])[0])[0])[1]
 
-        sr, mixture_y, active_label_sources = train_file_to_mixture_wav_label(file_list[idx])
+        sr, mixture_y, active_label_sources, gt_y = train_file_to_mixture_wav_label(file_list[idx])
             
-        active_labels = torch.stack([active_label_sources[src] for src in machine_types])
-        _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
-        # [src, b, ch, time]
-        if target_source is not None:
-            target_idx = machine_types.index(target_source)
-        else:
-            target_idx = machine_types.index(target_type)
-        ys = time[target_idx, 0, 0, :].detach().cpu().numpy()
+        # active_labels = torch.stack([active_label_sources[src] for src in machine_types])
+        # _, time = sep_model(torch.Tensor(mixture_y).unsqueeze(0).cuda(), active_labels.unsqueeze(0).cuda())
+        # # [src, b, ch, time]
+        # if target_source is not None:
+        #     target_idx = machine_types.index(target_source)
+        # else:
+        #     target_idx = machine_types.index(target_type)
+        # ys = time[target_idx, 0, 0, :].detach().cpu().numpy()
         
-        vector_array = wav_to_spec_vector_array(sr, ys,
+        vector_array = wav_to_spec_vector_array(sr, gt_y[0, :],
                                             n_mels=n_mels,
                                             frames=frames,
                                             n_fft=n_fft,
