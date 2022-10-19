@@ -101,9 +101,6 @@ def eval_file_to_mixture_wav_label(filename):
     
     return sr, ys, gt_wav, active_label_sources, active_spec_label_sources
 
-def get_overlap_ratio(signal1, signal2):
-    return torch.sum(torch.logical_and(signal1, signal2)) / torch.sum(torch.logical_or(signal1, signal2))
-
 
 class XUMXSystem(torch.nn.Module):
     def __init__(self):

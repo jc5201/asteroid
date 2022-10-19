@@ -21,6 +21,8 @@ import torch.nn as nn
 
 from utils import *
 from model import TorchModel
+
+from baseline_mix import *
 ########################################################################
 
 
@@ -48,7 +50,9 @@ def train_file_to_mixture_wav(filename):
         sr, y = demux_wav(src_filename)
         ys = ys + y
 
-    return sr, ys
+    _, active_spec_label = generate_label(numpy.expand_dims(ys, axis=0), MACHINE)
+
+    return sr, ys, active_spec_label
     
 def eval_file_to_mixture_wav(filename):
     machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
@@ -108,14 +112,17 @@ def train_list_to_mixture_spec_vector_array(file_list,
     # 02 loop of file_to_vectorarray
     for idx in tqdm(range(len(file_list)), desc=msg):
 
-        sr, ys = train_file_to_mixture_wav(file_list[idx])
+        sr, ys, spec_label = train_file_to_mixture_wav(file_list[idx])
         
+        spec_label = spec_label.unsqueeze(3).repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0).numpy()
+
         vector_array = wav_to_spec_vector_array(sr, ys,
                                             n_mels=n_mels,
                                             frames=frames,
                                             n_fft=n_fft,
                                             hop_length=hop_length,
-                                            power=power)
+                                            power=power,
+                                            spec_mask=spec_label)
 
         if idx == 0:
             dataset = numpy.zeros((vector_array.shape[0] * len(file_list), dims), float)
@@ -148,75 +155,6 @@ class AEDatasetMix(torch.utils.data.Dataset):
     
     def __len__(self):
         return self.data_vector.shape[0]
-
-def dataset_generator(target_dir,
-                      normal_dir_name="normal",
-                      abnormal_dir_name="abnormal",
-                      ext="wav"):
-    """
-    target_dir : str
-        base directory path of the dataset
-    normal_dir_name : str (default="normal")
-        directory name the normal data located in
-    abnormal_dir_name : str (default="abnormal")
-        directory name the abnormal data located in
-    ext : str (default="wav")
-        filename extension of audio files 
-    return : 
-        train_data : numpy.array( numpy.array( float ) )
-            training dataset
-            * dataset.shape = (total_dataset_size, feature_vector_length)
-        train_files : list [ str ]
-            file list for training
-        train_labels : list [ boolean ] 
-            label info. list for training
-            * normal/abnormal = 0/1
-        eval_files : list [ str ]
-            file list for evaluation
-        eval_labels : list [ boolean ] 
-            label info. list for evaluation
-            * normal/abnormal = 0/1
-    """
-
-    logger.info("target_dir : {}".format(target_dir))
-
-    # 01 normal list generate
-    normal_files = sorted(glob.glob(
-        os.path.abspath("{dir}/{normal_dir_name}/*.{ext}".format(dir=target_dir,
-                                                                 normal_dir_name=normal_dir_name,
-                                                                 ext=ext))))
-    normal_len = [len(glob.glob(
-        os.path.abspath("{dir}/{normal_dir_name}/*.{ext}".format(dir=target_dir.replace(S1, mt),
-                                                                 normal_dir_name=normal_dir_name,
-                                                                 ext=ext)))) for mt in machine_types]
-    normal_len = min(min(normal_len), len(normal_files))
-    normal_files = normal_files[:normal_len]
-
-    normal_labels = numpy.zeros(len(normal_files))
-    if len(normal_files) == 0:
-        logger.exception("no_wav_data!!")
-
-    # 02 abnormal list generate
-    abnormal_files = []
-    for machine_type in machine_types:
-        abnormal_files.extend(sorted(glob.glob(
-            os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir.replace(S1, machine_type),
-                                                                 abnormal_dir_name=abnormal_dir_name,
-                                                                 ext=ext)))))         
-
-    abnormal_labels = numpy.ones(len(abnormal_files))
-    if len(abnormal_files) == 0:
-        logger.exception("no_wav_data!!")
-
-    # 03 separate train & eval
-    train_files = normal_files[num_eval_normal:]
-    train_labels = normal_labels[num_eval_normal:]
-    eval_files = numpy.concatenate((normal_files[:num_eval_normal], abnormal_files), axis=0)
-    eval_labels = numpy.concatenate((normal_labels[:num_eval_normal], abnormal_labels), axis=0)
-    logger.info("train_file num : {num}".format(num=len(train_files)))
-    logger.info("eval_file  num : {num}".format(num=len(eval_files)))
-
-    return train_files, train_labels, eval_files, eval_labels
 
 
 ########################################################################
@@ -333,17 +271,20 @@ if __name__ == "__main__":
             sr, ys, y_raw, active_label_sources, active_spec_label_sources = eval_file_to_mixture_wav_label(file_name)
             # overlap_ratio = get_overlap_ratio(active_label_sources[machine_types[0]], active_label_sources[machine_types[1]])
 
+            n_mels = param["feature"]["n_mels"]
+            frames = param["feature"]["frames"]
+            # [1, 309, 5] -> [309, 5*n_mels]
+            active_spec_label = active_spec_label_sources[machine_type].cuda().unsqueeze(3).repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0)
+            
+            
             data = wav_to_spec_vector_array(sr, ys,
                                         n_mels=param["feature"]["n_mels"],
                                         frames=param["feature"]["frames"],
                                         n_fft=param["feature"]["n_fft"],
                                         hop_length=param["feature"]["hop_length"],
-                                        power=param["feature"]["power"])
+                                        power=param["feature"]["power"],
+                                        spec_mask=active_spec_label.cpu().numpy())
 
-            n_mels = param["feature"]["n_mels"]
-            frames = param["feature"]["frames"]
-            # [1, 309, 5] -> [309, 5*n_mels]
-            active_spec_label = active_spec_label_sources[machine_type].cuda().unsqueeze(3).repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0)
 
             data = torch.Tensor(data).cuda()
             error = torch.mean(((data - model(data)) ** 2), dim=1)
