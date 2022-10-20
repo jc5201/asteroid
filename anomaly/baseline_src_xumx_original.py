@@ -16,6 +16,7 @@ import librosa.feature
 import yaml
 import logging
 import random
+import matplotlib.pyplot as plt
 
 from tqdm import tqdm
 from sklearn import metrics
@@ -25,10 +26,12 @@ import torch
 import torch.nn as nn
 from asteroid.models import XUMXControl
 import museval
-
+import scipy
 
 from utils import *
 from model import TorchModel
+
+from activation_conf import compute_activation_confidence
 ########################################################################
 
 
@@ -44,7 +47,7 @@ __versions__ = "1.0.3"
 S1 = 'id_04'
 S2 = 'id_06'
 MACHINE = 'slider'
-FILE = 'slider_id04_id06_original.pth'
+FILE = 'valve_id04_id06_original.pth'
 xumx_slider_model_path = '/hdd/hdd1/sss/xumx/1013_9_slider0246_fix_control/checkpoints/epoch=198-step=3382.ckpt'
 xumx_valve_model_path = '/hdd/hdd1/sss/xumx/1013_8_valve0248_fix_control/checkpoints/epoch=214-step=4944.ckpt'
 xumx_model_path = xumx_valve_model_path if MACHINE == 'valve' else xumx_slider_model_path
@@ -83,9 +86,15 @@ def generate_label(y):
         min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
     
     label = (rms_trim > min_threshold).type(torch.float)
-        #[channel, time]
-    label_spec = (rms_trim_spec > min_threshold).type(torch.float) 
+    
+    label_spec = (rms_trim_spec > min_threshold).type(torch.float) # [2, 309, 5]
+   
+    for ch_idx in range(label_spec.shape[0]):
+        for frame_idx in range(label_spec.shape[2]):
+            label_spec[ch_idx, :, frame_idx] = torch.tensor(scipy.signal.medfilt(label_spec[ch_idx, :, frame_idx], 7))
+            
     return label, label_spec
+
 
 
 def train_file_to_mixture_wav_label(filename):
@@ -121,6 +130,7 @@ def eval_file_to_mixture_wav_label(filename):
         #     y = np.concatenate([np.zeros_like(y)[:, :delay], y[:, :audio_len - delay]], axis=1)
         ys = ys + y
         label, spec_label = generate_label(y)
+        #_, spec_label = compute_activation_confidence(y, sr)
         active_label_sources[normal_type] = label
         active_spec_label_sources[normal_type] = spec_label
         gt_wav[normal_type] = y
@@ -499,6 +509,13 @@ if __name__ == "__main__":
                 sdr_pred_normal[machine_type].append(numpy.mean(sep_sdr))
             else: # abnormal file
                 sdr_pred_abnormal[machine_type].append(numpy.mean(sep_sdr))
+            
+            # if num in [0, 1, 2]:
+            #     plt.figure()
+            #     plt.plot(y_raw[machine_type][0, :], 'r')
+            #     plt.plot(active_label_sources[machine_type][0, :], 'b')
+            #     plt.show()
+            #     plt.savefig("test_original_{}.png".format(num))
 
         mean_scores = []
         max_scores = []
@@ -525,7 +542,7 @@ if __name__ == "__main__":
         
         mean_score = sum(mean_scores) / len(mean_scores)
         max_score = sum(max_scores) / len(max_scores)
-        mask_score = sum(max_scores) / len(mask_scores)
+        mask_score = sum(mask_scores) / len(mask_scores)
         logger.info("AUC_mean : {}".format(mean_score))
         logger.info("AUC_max : {}".format(max_score))
         logger.info("AUC_mask : {}".format(mask_score))
