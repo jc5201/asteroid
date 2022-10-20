@@ -156,6 +156,75 @@ class AEDatasetMix(torch.utils.data.Dataset):
     def __len__(self):
         return self.data_vector.shape[0]
 
+def dataset_generator(target_dir,
+                      normal_dir_name="normal",
+                      abnormal_dir_name="abnormal",
+                      ext="wav"):
+    """
+    target_dir : str
+        base directory path of the dataset
+    normal_dir_name : str (default="normal")
+        directory name the normal data located in
+    abnormal_dir_name : str (default="abnormal")
+        directory name the abnormal data located in
+    ext : str (default="wav")
+        filename extension of audio files 
+    return : 
+        train_data : numpy.array( numpy.array( float ) )
+            training dataset
+            * dataset.shape = (total_dataset_size, feature_vector_length)
+        train_files : list [ str ]
+            file list for training
+        train_labels : list [ boolean ] 
+            label info. list for training
+            * normal/abnormal = 0/1
+        eval_files : list [ str ]
+            file list for evaluation
+        eval_labels : list [ boolean ] 
+            label info. list for evaluation
+            * normal/abnormal = 0/1
+    """
+
+    logger.info("target_dir : {}".format(target_dir))
+
+    # 01 normal list generate
+    normal_files = sorted(glob.glob(
+        os.path.abspath("{dir}/{normal_dir_name}/*.{ext}".format(dir=target_dir,
+                                                                 normal_dir_name=normal_dir_name,
+                                                                 ext=ext))))
+    normal_len = [len(glob.glob(
+        os.path.abspath("{dir}/{normal_dir_name}/*.{ext}".format(dir=target_dir.replace(S1, mt),
+                                                                 normal_dir_name=normal_dir_name,
+                                                                 ext=ext)))) for mt in machine_types]
+    normal_len = min(min(normal_len), len(normal_files))
+    normal_files = normal_files[:normal_len]
+
+    normal_labels = numpy.zeros(len(normal_files))
+    if len(normal_files) == 0:
+        logger.exception("no_wav_data!!")
+
+    # 02 abnormal list generate
+    abnormal_files = []
+    for machine_type in machine_types:
+        abnormal_files.extend(sorted(glob.glob(
+            os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir.replace(S1, machine_type),
+                                                                 abnormal_dir_name=abnormal_dir_name,
+                                                                 ext=ext)))))         
+
+    abnormal_labels = numpy.ones(len(abnormal_files))
+    if len(abnormal_files) == 0:
+        logger.exception("no_wav_data!!")
+
+    # 03 separate train & eval
+    train_files = normal_files[num_eval_normal:]
+    train_labels = normal_labels[num_eval_normal:]
+    eval_files = numpy.concatenate((normal_files[:num_eval_normal], abnormal_files), axis=0)
+    eval_labels = numpy.concatenate((normal_labels[:num_eval_normal], abnormal_labels), axis=0)
+    logger.info("train_file num : {num}".format(num=len(train_files)))
+    logger.info("eval_file  num : {num}".format(num=len(eval_files)))
+
+    return train_files, train_labels, eval_files, eval_labels
+
 
 ########################################################################
 # main
