@@ -218,8 +218,9 @@ def dataset_generator(target_dir,
     # 03 separate train & eval
     train_files = normal_files[num_eval_normal:]
     train_labels = normal_labels[num_eval_normal:]
-    eval_files = numpy.concatenate((normal_files[:num_eval_normal], abnormal_files), axis=0)
-    eval_labels = numpy.concatenate((normal_labels[:num_eval_normal], abnormal_labels), axis=0)
+    eval_normal_files = sum([[fan_file.replace(S1, machine_type) for fan_file in normal_files[:num_eval_normal]] for machine_type in machine_types], [])
+    eval_files = numpy.concatenate((eval_normal_files, abnormal_files), axis=0)
+    eval_labels = numpy.concatenate((np.repeat(normal_labels[:num_eval_normal], len(machine_types)), abnormal_labels), axis=0)  
     logger.info("train_file num : {num}".format(num=len(train_files)))
     logger.info("eval_file  num : {num}".format(num=len(eval_files)))
 
@@ -344,6 +345,7 @@ if __name__ == "__main__":
             frames = param["feature"]["frames"]
             # [1, 309, 5] -> [309, 5*n_mels]
             active_spec_label = active_spec_label_sources[machine_type].cuda().unsqueeze(3).repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0)
+            active_ratio = torch.sum(active_spec_label) / torch.sum(torch.ones_like(active_spec_label))
             
             
             data = wav_to_spec_vector_array(sr, ys,
@@ -360,12 +362,8 @@ if __name__ == "__main__":
             error_mask = torch.mean(((data - model(data)) * active_spec_label) ** 2, dim=1)
             y_pred_mean[num] = torch.mean(error).detach().cpu().numpy()
             y_pred_max[num] = torch.max(error).detach().cpu().numpy()
-            y_pred_mask[num] = torch.mean(error_mask).detach().cpu().numpy()
+            y_pred_mask[num] = (torch.mean(error_mask) / active_ratio).detach().cpu().numpy()
 
-            if num < num_eval_normal:
-                for mt in machine_types:
-                    eval_types[mt].append(num)
-            else:
                 eval_types[machine_type].append(num)
 
         mean_scores = []
