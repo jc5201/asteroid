@@ -235,6 +235,7 @@ if __name__ == "__main__":
             frames = param["feature"]["frames"]
             # [1, 309, 5] -> [309, 5*n_mels]
             active_spec_label = active_spec_label.cuda().unsqueeze(3).repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0)
+            active_ratio = torch.sum(active_spec_label) / torch.sum(torch.ones_like(active_spec_label))
 
             data = wav_to_spec_vector_array(sr, ys,
                                         n_mels=param["feature"]["n_mels"],
@@ -250,7 +251,7 @@ if __name__ == "__main__":
             error_mask = torch.mean(((data - model(data)) * active_spec_label) ** 2, dim=1)
             y_pred_mean[num] = torch.mean(error).detach().cpu().numpy()
             y_pred_max[num] = torch.max(error).detach().cpu().numpy()
-            y_pred_mask[num] = torch.mean(error_mask).detach().cpu().numpy()
+            y_pred_mask[num] = (torch.mean(error_mask) / active_ratio).detach().cpu().numpy()
 
         # save model
         torch.save(model.state_dict(), model_file)
