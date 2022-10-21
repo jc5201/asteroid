@@ -9,6 +9,7 @@ from torchaudio import transforms
 import librosa
 from itertools import product
 import numpy as np
+import scipy
 
 from .mimii_valve_dataset import MIMIIValveDataset
 
@@ -71,5 +72,6 @@ class MIMIISliderDataset(MIMIIValveDataset):
         min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
 
         label = (rms_trim > min_threshold).type(torch.float) 
+        label = torch.Tensor(scipy.ndimage.binary_dilation(label.numpy(), iterations=3)).type(torch.float) 
         #[channel, time]
         return label

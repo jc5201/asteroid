@@ -353,11 +353,7 @@ def main(conf, args):
             hidden_size=args.hidden_size,
             in_chan=args.in_chan,
             n_hop=args.nhop,
-<<<<<<< HEAD
-            sources=[args.sources[0], args.sources[1]],  #sources=args.sources,
-=======
             sources=['s1', 's2', 's3', 's4'][:args.num_src_in_mix],  #sources=args.sources,
->>>>>>> origin/kjc-overlap
             max_bin=max_bin,
             bidirectional=args.bidirectional,
             sample_rate=train_dataset.sample_rate,
@@ -373,11 +369,8 @@ def main(conf, args):
             hidden_size=args.hidden_size,
             in_chan=args.in_chan,
             n_hop=args.nhop,
-<<<<<<< HEAD
-            sources=[args.sources[0], args.sources[1]], #sources=args.sources,
-=======
             sources=['s1', 's2', 's3', 's4'][:args.num_src_in_mix], #sources=args.sources,
->>>>>>> origin/kjc-overlap
+
             max_bin=max_bin,
             bidirectional=args.bidirectional,
             sample_rate=train_dataset.sample_rate,

@@ -9,6 +9,7 @@ from torchaudio import transforms
 import librosa
 from itertools import product
 import numpy as np
+import scipy
 
 class MIMIIValveDataset(torch.utils.data.Dataset):
     """MUSDB18 music separation dataset
@@ -218,6 +219,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         min_threshold, _ = torch.kthvalue(rms_trim[0, :], k)
 
         label = (rms_trim > min_threshold).type(torch.float) 
+        label = torch.Tensor(scipy.ndimage.binary_dilation(label.numpy(), iterations=3)).type(torch.float) 
         #[channel, time]
         return label
 
