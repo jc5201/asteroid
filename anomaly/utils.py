@@ -8,6 +8,7 @@ import numpy as np
 import librosa
 import librosa.core
 import librosa.feature
+import scipy
 import yaml
 import logging
 from tqdm import tqdm
@@ -197,6 +198,7 @@ def generate_label(y, machine='valve'):
         min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
 
     label = (rms_trim > min_threshold).type(torch.float) 
+    label = torch.Tensor(scipy.ndimage.binary_dilation(label.numpy(), iterations=3)).type(torch.float) 
     #[channel, time]
     label_spec = (rms_trim_spec > min_threshold).type(torch.float) 
     return label, label_spec
