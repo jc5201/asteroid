@@ -40,33 +40,6 @@ num_eval_normal = 250
 # feature extractor
 ########################################################################
 
-def generate_label(y):
-    # np, [c, t]
-    channels = y.shape[0]
-    frames = 5
-    rms_fig = librosa.feature.rms(y=y) 
-    #[c, 1, 313]
-
-    rms_tensor = torch.tensor(rms_fig).permute(0, 2, 1)
-    # [channel, time, 1]
-    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
-    # [channel, time]
-
-    rms_trim_spec = torch.stack([torch.tensor(rms_fig[:, 0, i:i+rms_fig.shape[2]-frames+1]) for i in range(frames)], dim=2)
-    #[c, 313-4, 5]
-
-
-    if MACHINE == 'valve':
-        k = int(y.shape[1]*0.8)
-        min_threshold, _ = torch.kthvalue(rms_trim[0, :], k)
-    else:
-        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
-
-    label = (rms_trim > min_threshold).type(torch.float) 
-    #[channel, time]
-    label_spec = (rms_trim_spec > min_threshold).type(torch.float) 
-    return label, label_spec
-
 def train_file_to_mixture_wav(filename):
     machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
     ys = 0
@@ -103,15 +76,12 @@ def eval_file_to_mixture_wav_label(filename):
             src_filename = filename.replace(machine_type, normal_type).replace('abnormal', 'normal')
         sr, y = demux_wav(src_filename)
         ys = ys + y
-        label, spec_label = generate_label(np.expand_dims(y, axis=0))
+        label, spec_label = generate_label(np.expand_dims(y, axis=0), MACHINE)
         active_label_sources[normal_type] = label
         active_spec_label_sources[normal_type] = spec_label
         gt_wav[normal_type] = y
     
     return sr, ys, gt_wav, active_label_sources, active_spec_label_sources
-
-def get_overlap_ratio(signal1, signal2):
-    return torch.sum(torch.logical_and(signal1, signal2)) / torch.sum(torch.logical_or(signal1, signal2))
 
 def train_list_to_mixture_spec_vector_array(file_list,
                          msg="calc...",

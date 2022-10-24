@@ -32,6 +32,8 @@ import torch.nn as nn
 
 from utils import *
 from model import TorchModel
+
+from baseline import *
 ########################################################################
 
 
@@ -50,18 +52,7 @@ num_eval_normal = 250
 # feature extractor
 ########################################################################
 
-def eval_file_to_wav_label(filename):
-    machine_type = os.path.split(os.path.split(os.path.split(filename)[0])[0])[1]
-    ys = 0
-
-    src_filename = filename
-    sr, y = demux_wav(src_filename)
-    ys = ys + y
-    _, active_spec_label = generate_label(numpy.expand_dims(y, axis=0), MACHINE)
-    
-    return sr, ys, active_spec_label
-
-def list_to_spec_vector_array(file_list,
+def list_to_masked_spec_vector_array(file_list,
                          msg="calc...",
                          n_mels=64,
                          frames=5,
@@ -86,12 +77,13 @@ def list_to_spec_vector_array(file_list,
     # 02 loop of file_to_vectorarray
     for idx in tqdm(range(len(file_list)), desc=msg):
 
-        vector_array = file_to_spec_vector_array(file_list[idx],
+        vector_array = file_to_masked_spec_vector_array(file_list[idx],
                                             n_mels=n_mels,
                                             frames=frames,
                                             n_fft=n_fft,
                                             hop_length=hop_length,
-                                            power=power)
+                                            power=power,
+                                            machine=MACHINE)
 
         if idx == 0:
             dataset = numpy.zeros((vector_array.shape[0] * len(file_list), dims), float)
@@ -110,7 +102,7 @@ class AEDataset(torch.utils.data.Dataset):
         self.file_list = file_list
         self.target_source = target_source
 
-        self.data_vector = list_to_spec_vector_array(self.file_list,
+        self.data_vector = list_to_masked_spec_vector_array(self.file_list,
                                             msg="generate train_dataset",
                                             n_mels=param["feature"]["n_mels"],
                                             frames=param["feature"]["frames"],
@@ -125,65 +117,6 @@ class AEDataset(torch.utils.data.Dataset):
     
     def __len__(self):
         return self.data_vector.shape[0]
-
-
-def dataset_generator(target_dir,
-                      normal_dir_name="normal",
-                      abnormal_dir_name="abnormal",
-                      ext="wav"):
-    """
-    target_dir : str
-        base directory path of the dataset
-    normal_dir_name : str (default="normal")
-        directory name the normal data located in
-    abnormal_dir_name : str (default="abnormal")
-        directory name the abnormal data located in
-    ext : str (default="wav")
-        filename extension of audio files 
-    return : 
-        train_data : numpy.array( numpy.array( float ) )
-            training dataset
-            * dataset.shape = (total_dataset_size, feature_vector_length)
-        train_files : list [ str ]
-            file list for training
-        train_labels : list [ boolean ] 
-            label info. list for training
-            * normal/abnormal = 0/1
-        eval_files : list [ str ]
-            file list for evaluation
-        eval_labels : list [ boolean ] 
-            label info. list for evaluation
-            * normal/abnormal = 0/1
-    """
-    logger.info("target_dir : {}".format(target_dir))
-
-    # 01 normal list generate
-    normal_files = sorted(glob.glob(
-        os.path.abspath("{dir}/{normal_dir_name}/*.{ext}".format(dir=target_dir,
-                                                                 normal_dir_name=normal_dir_name,
-                                                                 ext=ext))))
-    normal_labels = numpy.zeros(len(normal_files))
-    if len(normal_files) == 0:
-        logger.exception("no_wav_data!!")
-
-    # 02 abnormal list generate
-    abnormal_files = sorted(glob.glob(
-        os.path.abspath("{dir}/{abnormal_dir_name}/*.{ext}".format(dir=target_dir,
-                                                                   abnormal_dir_name=abnormal_dir_name,
-                                                                   ext=ext))))                              
-    abnormal_labels = numpy.ones(len(abnormal_files))
-    if len(abnormal_files) == 0:
-        logger.exception("no_wav_data!!")
-
-    # 03 separate train & eval
-    train_files = normal_files[len(abnormal_files):]
-    train_labels = normal_labels[len(abnormal_files):]
-    eval_files = numpy.concatenate((normal_files[:len(abnormal_files)], abnormal_files), axis=0)
-    eval_labels = numpy.concatenate((normal_labels[:len(abnormal_files)], abnormal_labels), axis=0)
-    logger.info("train_file num : {num}".format(num=len(train_files)))
-    logger.info("eval_file  num : {num}".format(num=len(eval_files)))
-
-    return train_files, train_labels, eval_files, eval_labels
 
 
 ########################################################################
@@ -253,11 +186,6 @@ if __name__ == "__main__":
 
         # dataset generator
         print("============== DATASET_GENERATOR ==============")
-        # if os.path.exists(train_pickle) and os.path.exists(eval_files_pickle) and os.path.exists(eval_labels_pickle):
-        #     train_files = load_pickle(train_pickle)
-        #     eval_files = load_pickle(eval_files_pickle)
-        #     eval_labels = load_pickle(eval_labels_pickle)
-        # else:
         train_files, train_labels, eval_files, eval_labels = dataset_generator(target_dir)
 
         save_pickle(train_pickle, train_files)
@@ -302,18 +230,21 @@ if __name__ == "__main__":
             
             sr, ys, active_spec_label = eval_file_to_wav_label(file_name)
             # active_label [channel, time]
-            data = wav_to_spec_vector_array(sr, ys,
-                                        n_mels=param["feature"]["n_mels"],
-                                        frames=param["feature"]["frames"],
-                                        n_fft=param["feature"]["n_fft"],
-                                        hop_length=param["feature"]["hop_length"],
-                                        power=param["feature"]["power"])
             
             n_mels = param["feature"]["n_mels"]
             frames = param["feature"]["frames"]
             # [1, 309, 5] -> [309, 5*n_mels]
             active_spec_label = active_spec_label.cuda().unsqueeze(3).repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0)
             active_ratio = torch.sum(active_spec_label) / torch.sum(torch.ones_like(active_spec_label))
+
+            data = wav_to_spec_vector_array(sr, ys,
+                                        n_mels=param["feature"]["n_mels"],
+                                        frames=param["feature"]["frames"],
+                                        n_fft=param["feature"]["n_fft"],
+                                        hop_length=param["feature"]["hop_length"],
+                                        power=param["feature"]["power"],
+                                        spec_mask=active_spec_label.cpu().numpy())
+            
 
             data = torch.Tensor(data).cuda()
             error = torch.mean((data - model(data)) ** 2, dim=1)

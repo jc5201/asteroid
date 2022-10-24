@@ -46,8 +46,8 @@ __versions__ = "1.0.3"
 # choose machine type and id
 S1 = 'id_00'
 S2 = 'id_02'
-MACHINE = 'slider'
-FILE = 'valve_id04_id06_original.pth'
+MACHINE = 'valve'
+FILE = 'valve_id00_id02_original.pth'
 xumx_slider_model_path = '/hdd/hdd1/sss/xumx/1013_9_slider0246_fix_control/checkpoints/epoch=198-step=3382.ckpt'
 xumx_valve_model_path = '/hdd/hdd1/sss/xumx/1013_8_valve0248_fix_control/checkpoints/epoch=214-step=4944.ckpt'
 xumx_model_path = xumx_valve_model_path if MACHINE == 'valve' else xumx_slider_model_path
@@ -65,11 +65,12 @@ num_eval_normal = 250
 
 
 def generate_label(y):
-    # np, [c, t]
+        # np, [c, t]
     channels = y.shape[0]
     frames = 5
     rms_fig = librosa.feature.rms(y=y)
     #[c, 1, 313]
+
     rms_tensor = torch.tensor(rms_fig).permute(0, 2, 1)
     # [channel, time, 1]
     rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
@@ -85,13 +86,8 @@ def generate_label(y):
         min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
     
     label = (rms_trim > min_threshold).type(torch.float)
-    
-    label_spec = (rms_trim_spec > min_threshold).type(torch.float) # [2, 309, 5]
-   
-    for ch_idx in range(label_spec.shape[0]):
-        for frame_idx in range(label_spec.shape[2]):
-            label_spec[ch_idx, :, frame_idx] = torch.tensor(scipy.signal.medfilt(label_spec[ch_idx, :, frame_idx], 7))
-            
+        #[channel, time]
+    label_spec = (rms_trim_spec > min_threshold).type(torch.float) 
     return label, label_spec
 
 
@@ -129,15 +125,11 @@ def eval_file_to_mixture_wav_label(filename):
         #     y = np.concatenate([np.zeros_like(y)[:, :delay], y[:, :audio_len - delay]], axis=1)
         ys = ys + y
         label, spec_label = generate_label(y)
-        #_, spec_label = compute_activation_confidence(y, sr)
         active_label_sources[normal_type] = label
         active_spec_label_sources[normal_type] = spec_label
         gt_wav[normal_type] = y
     
     return sr, ys, gt_wav, active_label_sources, active_spec_label_sources
-
-def get_overlap_ratio(signal1, signal2):
-    return torch.sum(torch.logical_and(signal1, signal2)) / torch.sum(torch.logical_or(signal1, signal2))
 
 
 class XUMXSystem(torch.nn.Module):
@@ -456,6 +448,7 @@ if __name__ == "__main__":
         y_pred_mean = numpy.array([0. for k in eval_labels])
         y_pred_max = numpy.array([0. for k in eval_labels])
         y_pred_mask = numpy.array([0. for k in eval_labels])
+        y_pred_inactive = numpy.array([0. for k in eval_labels])
         y_true = numpy.array(eval_labels)
         sdr_pred_normal = {mt: [] for mt in machine_types}
         sdr_pred_abnormal = {mt: [] for mt in machine_types}
@@ -486,11 +479,14 @@ if __name__ == "__main__":
             # [1, 309, 5] -> [309, 5*n_mels]
             active_spec_label = active_spec_label_sources[machine_type][:1, :, :].cuda().unsqueeze(3)   \
                 .repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0)
-
+            active_ratio = torch.sum(active_spec_label) / torch.sum(torch.ones_like(active_spec_label))
+            inactive_ratio = 1 - active_ratio
+            
             data = torch.Tensor(data).cuda()
             error = torch.mean(((data - model[machine_type](data)) ** 2), dim=1)
             error_mask = torch.mean(((data - model[machine_type](data)) * active_spec_label) ** 2, dim=1)
-
+            inactive_mask = error - error_mask
+            
             sep_sdr, _, _, _ = museval.evaluate(numpy.expand_dims(y_raw[machine_type][0, :ys.shape[0]], axis=(0,2)), 
                                         numpy.expand_dims(ys, axis=(0,2)))
             # y_gt = torch.stack([torch.Tensor(y_raw[src]) for src in machine_types])[:, :, :ys.shape[0]]
@@ -500,8 +496,8 @@ if __name__ == "__main__":
 
             y_pred_mean[num] = torch.mean(error).detach().cpu().numpy()
             y_pred_max[num] = torch.max(error).detach().cpu().numpy()
-            y_pred_mask[num] = torch.mean(error_mask).detach().cpu().numpy()
-            
+            y_pred_mask[num] = (torch.mean(error_mask) / active_ratio).detach().cpu().numpy()
+            y_pred_inactive[num] = (torch.mean(inactive_mask) / inactive_ratio).detach().cpu().numpy()
             eval_types[machine_type].append(num)
 
             if num < num_eval_normal * len(machine_types): # normal file
@@ -515,7 +511,10 @@ if __name__ == "__main__":
             #     plt.plot(active_label_sources[machine_type][0, :], 'b')
             #     plt.show()
             #     plt.savefig("test_original_{}.png".format(num))
-
+        
+        active_mean = np.mean(y_pred_mask)
+        inactive_mean = np.mean(y_pred_inactive)
+        
         mean_scores = []
         max_scores = []
         mask_scores = []
@@ -538,6 +537,7 @@ if __name__ == "__main__":
             logger.info("SDR_abnormal_{} : {}".format(machine_type, sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type])))
             evaluation_result["SDR_normal_{}".format(machine_type)] = float(sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type]))
             evaluation_result["SDR_abnormal_{}".format(machine_type)] = float(sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type]))
+                    
         
         mean_score = sum(mean_scores) / len(mean_scores)
         max_score = sum(max_scores) / len(max_scores)
@@ -549,6 +549,11 @@ if __name__ == "__main__":
         evaluation_result["AUC_max"] = float(max_score)
         evaluation_result["AUC_mask"] = float(mask_score)
         results[evaluation_result_key] = evaluation_result
+        
+        logger.info("active_mean: {}".format(active_mean))
+        logger.info("inactive_mean: {}".format(inactive_mean ))
+        evaluation_result["active_mean"] = float(active_mean)
+        evaluation_result["inactive_mean"] = float(inactive_mean)
         print("===========================")
 
     # output results

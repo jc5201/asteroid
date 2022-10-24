@@ -4,6 +4,7 @@ import sys
 import glob
 
 import numpy
+import numpy as np
 import librosa
 import librosa.core
 import librosa.feature
@@ -170,13 +171,44 @@ def bandwidth_to_max_bin(rate, n_fft, bandwidth):
     return numpy.max(numpy.where(freqs <= bandwidth)[0]) + 1
 
 
+def get_overlap_ratio(signal1, signal2):
+    return torch.sum(torch.logical_and(signal1, signal2)) / torch.sum(torch.logical_or(signal1, signal2))
+
+
+def generate_label(y, machine='valve'):
+    # np, [c, t]
+    channels = y.shape[0]
+    frames = 5
+    rms_fig = librosa.feature.rms(y=y) 
+    #[c, 1, 313]
+
+    rms_tensor = torch.tensor(rms_fig).permute(0, 2, 1)
+    # [channel, time, 1]
+    rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
+    # [channel, time]
+
+    rms_trim_spec = torch.stack([torch.tensor(rms_fig[:, 0, i:i+rms_fig.shape[2]-frames+1]) for i in range(frames)], dim=2)
+    #[c, 313-4, 5]
+
+    if machine == 'valve':
+        k = int(y.shape[1]*0.8)
+        min_threshold, _ = torch.kthvalue(rms_trim[0, :], k)
+    else:
+        min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
+
+    label = (rms_trim > min_threshold).type(torch.float) 
+    #[channel, time]
+    label_spec = (rms_trim_spec > min_threshold).type(torch.float) 
+    return label, label_spec
+
 
 def wav_to_spec_vector_array(sr, y,
                          n_mels=64,
                          frames=5,
                          n_fft=1024,
                          hop_length=512,
-                         power=2.0):
+                         power=2.0,
+                         spec_mask=None):
     """
     convert file_name to a vector array.
     file_name : str
@@ -211,6 +243,11 @@ def wav_to_spec_vector_array(sr, y,
     for t in range(frames):
         vectorarray[:, n_mels * t: n_mels * (t + 1)] = log_mel_spectrogram[:, t: t + vectorarray_size].T
 
+    if spec_mask is not None:
+        assert spec_mask.shape[0] == vectorarray.shape[0]
+        assert spec_mask.shape[1] == vectorarray.shape[1]
+        vectorarray = numpy.multiply(vectorarray, spec_mask)
+
     return vectorarray
 
 
@@ -228,6 +265,27 @@ def file_to_spec_vector_array(file_name,
                          n_fft,
                          hop_length,
                          power)
+
+def file_to_masked_spec_vector_array(file_name,
+                         n_mels=64,
+                         frames=5,
+                         n_fft=1024,
+                         hop_length=512,
+                         power=2.0,
+                         machine='valve'):
+
+    sr, y = demux_wav(file_name)
+    _, spec_label = generate_label(np.expand_dims(y, axis=0), machine)
+    spec_label = spec_label.unsqueeze(3).repeat(1, 1, 1, n_mels).reshape(1, 309, frames * n_mels).squeeze(0).numpy()
+    # [309, 320]
+
+    return wav_to_spec_vector_array(sr, y, 
+                         n_mels,
+                         frames,
+                         n_fft,
+                         hop_length,
+                         power,
+                         spec_mask=spec_label)
 
 
 def wav_to_spec_vector_2d_array(sr, y,
