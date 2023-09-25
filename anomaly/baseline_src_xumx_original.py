@@ -7,6 +7,7 @@ import pickle
 import os
 import sys
 import glob
+import sys
 
 import numpy
 import numpy as np
@@ -41,10 +42,10 @@ __versions__ = "1.0.3"
 
 ########################################################################
 # choose machine type and id
-S1 = 'id_04'
-S2 = 'id_06'
-MACHINE = 'slider'
-FILE = 'slider_id04_id06_original.pth'
+S1 = 'id_00'
+S2 = 'id_02'
+MACHINE = 'valve'
+FILE = 'valve_id00_id02_test.pth'
 xumx_slider_model_path = '/hdd/hdd1/sss/xumx/1013_9_slider0246_fix_control/checkpoints/epoch=198-step=3382.ckpt'
 xumx_valve_model_path = '/hdd/hdd1/sss/xumx/1013_8_valve0248_fix_control/checkpoints/epoch=214-step=4944.ckpt'
 xumx_model_path = xumx_valve_model_path if MACHINE == 'valve' else xumx_slider_model_path
@@ -499,11 +500,18 @@ if __name__ == "__main__":
                 sdr_pred_normal[machine_type].append(numpy.mean(sep_sdr))
             else: # abnormal file
                 sdr_pred_abnormal[machine_type].append(numpy.mean(sep_sdr))
-
+       
         mean_scores = []
         max_scores = []
         mask_scores = []
         anomaly_detect_score = {}
+        
+        f = open('AnomalyScore.txt', 'w')
+        f2 = open("MaskAnomalyScore", 'f2')
+        print(y_pred_mean, file= f)
+        print(y_pred_mask, file=f2)
+        f.close()
+        f2.close()
 
         for machine_type in machine_types:
             mean_score = metrics.roc_auc_score(y_true[eval_types[machine_type]], y_pred_mean[eval_types[machine_type]])
@@ -521,11 +529,11 @@ if __name__ == "__main__":
             logger.info("SDR_normal_{} : {}".format(machine_type, sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type])))
             logger.info("SDR_abnormal_{} : {}".format(machine_type, sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type])))
             evaluation_result["SDR_normal_{}".format(machine_type)] = float(sum(sdr_pred_normal[machine_type])/len(sdr_pred_normal[machine_type]))
-            evaluation_result["SDR_abnormal_{}".format(machine_type)] = float(sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type]))
+            evaluation_result["SDR_abnormal_{}".format(machine_type)] = float(sum(sdr_pred_abnormal[machine_type])/len(sdr_pred_abnormal[machine_type]))        
         
         mean_score = sum(mean_scores) / len(mean_scores)
         max_score = sum(max_scores) / len(max_scores)
-        mask_score = sum(max_scores) / len(mask_scores)
+        mask_score = sum(mask_scores) / len(mask_scores)
         logger.info("AUC_mean : {}".format(mean_score))
         logger.info("AUC_max : {}".format(max_score))
         logger.info("AUC_mask : {}".format(mask_score))

@@ -1,9 +1,9 @@
-base_directory : /dev/shm/mimii
+base_directory : /hdd/hdd1/mimii
 pickle_directory: ./pickle
 model_directory: ./model
-result_directory: ./result
-result_file: slider_id00_02_original_seed3.yaml
-seed: 3
+result_directory: result_0916_test
+result_file: original_valve_seed0.yaml
+seed: 0
 
 feature:
   n_mels: 64
@@ -16,7 +16,7 @@ fit:
   compile:
     optimizer : adam
     loss : mean_squared_error
-  epochs : 1
+  epochs : 50
   batch_size : 512
   shuffle : True
   validation_split : 0.1

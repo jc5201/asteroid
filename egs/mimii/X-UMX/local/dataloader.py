@@ -1,4 +1,4 @@
-from asteroid.data import MIMIISliderDataset, MIMIIValveDataset
+from asteroid.data import MIMIISliderDataset, MIMIIValveDataset, MIMIIValveOverlapDataset
 import torch
 from pathlib import Path
 import numpy as np
@@ -27,7 +27,7 @@ def load_datasets(parser, args):
     )
 
     if args.machine_type == 'valve':
-        Dataset = MIMIIValveDataset
+        Dataset = MIMIIValveOverlapDataset
         validation_tracks = validation_tracks = ["00000000", "00000001","00000002", "00000003"]
     elif args.machine_type == 'slider':
         Dataset = MIMIISliderDataset

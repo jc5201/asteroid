@@ -71,5 +71,13 @@ class MIMIISliderDataset(MIMIIValveDataset):
         min_threshold = (torch.max(rms_trim) + torch.min(rms_trim))/2
 
         label = (rms_trim > min_threshold).type(torch.float) 
+        
+        # time = int(audio.shape[1]//1000) # 0.1 sec
+        # label_index_lst = torch.nonzero((label[:,1:] - label[:,:-1]) == 1).tolist()
+        # square_labels = torch.zeros_like(label)
+        
+        # for idx in label_index_lst:
+        #     square_labels[idx[0],(idx[1] + 1):(idx[1] + time)] = 1.0
+    
         #[channel, time]
         return label

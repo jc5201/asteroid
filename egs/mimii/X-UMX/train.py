@@ -278,7 +278,17 @@ class XUMXControlManager(XUMXManager):
 
                 sdr_mix, _, _, _ = museval.evaluate(targets.detach().cpu(), mixture.detach().cpu())
                 sdr, _, _, _ = museval.evaluate(targets.detach().cpu(), time_hat.detach().cpu())
-
+                
+                
+                ##########################################################################
+                print(label.shape)      
+        
+        
+                
+                ##########################################################################
+                
+                
+            
                 sdr_tmp += np.mean(sdr, axis=1)
                 sdri_tmp += np.mean(sdr - sdr_mix, axis=1)
 
@@ -353,11 +363,7 @@ def main(conf, args):
             hidden_size=args.hidden_size,
             in_chan=args.in_chan,
             n_hop=args.nhop,
-<<<<<<< HEAD
-            sources=[args.sources[0], args.sources[1]],  #sources=args.sources,
-=======
             sources=['s1', 's2', 's3', 's4'][:args.num_src_in_mix],  #sources=args.sources,
->>>>>>> origin/kjc-overlap
             max_bin=max_bin,
             bidirectional=args.bidirectional,
             sample_rate=train_dataset.sample_rate,
@@ -373,11 +379,7 @@ def main(conf, args):
             hidden_size=args.hidden_size,
             in_chan=args.in_chan,
             n_hop=args.nhop,
-<<<<<<< HEAD
-            sources=[args.sources[0], args.sources[1]], #sources=args.sources,
-=======
             sources=['s1', 's2', 's3', 's4'][:args.num_src_in_mix], #sources=args.sources,
->>>>>>> origin/kjc-overlap
             max_bin=max_bin,
             bidirectional=args.bidirectional,
             sample_rate=train_dataset.sample_rate,
@@ -415,6 +417,7 @@ def main(conf, args):
             reduce="",
         )
         loss_func = CustomPITLossWrapper(loss_func=base_loss_func, pit_from="perm_avg")
+    
     else:
         loss_func = MultiDomainLoss(
             window_length=args.window_length,

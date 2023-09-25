@@ -9,6 +9,8 @@ from torchaudio import transforms
 import librosa
 from itertools import product
 import numpy as np
+import scipy
+import sys
 
 class MIMIIValveDataset(torch.utils.data.Dataset):
     """MUSDB18 music separation dataset
@@ -113,6 +115,8 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         self.machine_type_dir = machine_type_dir
 
         self.tracks = list(self.get_tracks())
+        self.overlap_ratio_lst = []
+        
         if not self.tracks:
             raise RuntimeError("No tracks found.")
 
@@ -178,7 +182,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
                 label = self.generate_label(audio)
                 #[channel, time]
                 active_label_sources[source] = label
-
+                
         # apply linear mix over source index=0
         # make mixture for i-th channel and use 0-th chnnel as gt
         if self.task_random:
@@ -199,6 +203,20 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
             # [source, channel, time]
             if targets:
                 active_labels = active_labels[:, 0:2, :]
+            ##############################################################################
+            # calculate overlap ratio #
+            overlap_rate = torch.sum(active_labels[0,0,:] * active_labels[1,0,:])
+            overlap_ratio = (overlap_rate/torch.sum(active_labels[0,0,:])) + (overlap_rate/torch.sum(active_labels[1,0,:]))
+            overlap_ratio = overlap_ratio/2
+            
+            
+            
+            # self.overlap_ratio_lst.append(float(overlap_ratio))
+            # f = open('overlap_ratio_slider.txt', 'w')
+            # print(self.overlap_ratio_lst, file = f)  
+            # print(np.mean(np.array((self.overlap_ratio_lst))))
+            ##############################################################################
+
             return audio_mix, audio_sources, active_labels
 
         return audio_mix, audio_sources
@@ -213,11 +231,21 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
         # [channel, time, 1]
         rms_trim = rms_tensor.expand(-1, -1, 512).reshape(channels, -1)[:, :160000]
         # [channel, time]
-
         k = int(audio.shape[1]*0.8)
         min_threshold, _ = torch.kthvalue(rms_trim[0, :], k)
 
-        label = (rms_trim > min_threshold).type(torch.float) 
+        label = (rms_trim > min_threshold).type(torch.float)
+        label = torch.Tensor(scipy.ndimage.binary_dilation(label.numpy(), iterations=3)).type(torch.float) 
+        
+        # ##############################################################################
+        # time = int(audio.shape[1]//1000) # 0.1 sec
+        # label_index_lst = torch.nonzero((label[:,1:] - label[:,:-1]) == 1).tolist()
+        # first_idx = label_index_lst[0]
+        # square_labels = torch.zeros_like(label)
+        
+        # for idx in label_index_lst:
+        #     square_labels[idx[0],(idx[1] + 1):(idx[1] + time)] = 1.0
+        # ##############################################################################
         #[channel, time]
         return label
 
@@ -241,6 +269,7 @@ class MIMIIValveDataset(torch.utils.data.Dataset):
             
             if self.source_random:
                 source_paths = [track_path]
+                
             else:
                 source_paths = [Path(str(track_path).replace(self.sources[0], s)) for s in self.sources]
             if not all(sp.exists() for sp in source_paths):
