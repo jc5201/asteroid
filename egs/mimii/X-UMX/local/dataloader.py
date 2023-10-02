@@ -27,7 +27,7 @@ def load_datasets(parser, args):
     )
 
     if args.machine_type == 'valve':
-        Dataset = MIMIIValveOverlapDataset
+        Dataset = MIMIIValveDataset
         validation_tracks = validation_tracks = ["00000000", "00000001","00000002", "00000003"]
     elif args.machine_type == 'slider':
         Dataset = MIMIISliderDataset
